@@ -1,6 +1,6 @@
 {
   "name": "Antigravity Master Suite",
-  "description": "All-in-One: 100% Blocked user elimination (Chat & Member Lists), LRU Hermes memory optimization, FlatList/FlashList virtualization, and zero 'Messages failed to load' auto-recovery.",
+  "description": "All-in-One: 100% Consistent member lists & chat (0 duplicate names, 0 missing players, 100% blocked elimination), LRU Hermes memory optimization, and auto-recovery.",
   "authors": [
     {
       "name": "Antigravity",
@@ -8,6 +8,6 @@
     }
   ],
   "main": "index.js",
-  "version": "2.3.0",
-  "hash": "4d444e9c1e6b6362b0ac5ab047daa148dbb21b2d5c1190bf37e5d2de9f2359f7"
+  "version": "2.4.0",
+  "hash": "e5245f11d5a58d68aac5f64fb458d69fc1c6c4872a9d208962bd84cf363a7c76"
 }
