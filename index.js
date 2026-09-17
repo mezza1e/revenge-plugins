@@ -57,7 +57,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v1.8.0: ACTIVE'
+                    content: 'Antigravity Master Suite v1.9.0: ACTIVE'
                 });
                 return;
             }
@@ -65,7 +65,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v1.8.0: ACTIVE');
+                showToast('Antigravity Master Suite v1.9.0: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -175,7 +175,8 @@
         if (typeof item === 'string') return isBlockedOrIgnored(item);
         if (typeof item !== 'object') return false;
 
-        // Never mistakenly match guilds or channels
+        // Never match headers, dividers, guilds, or channels
+        if (item.type === 'HEADER' || item.type === 1 || item.header) return false;
         if (item.features || item.mfaLevel !== undefined || item.vanityURLCode !== undefined) return false;
         if (item.bitrate !== undefined || item.topic !== undefined || item.rateLimitPerUser !== undefined) return false;
         if (item.type === 'GUILD' || item.type === 'CHANNEL' || item.type === 'FOLDER') return false;
@@ -187,7 +188,7 @@
                    item.memberId ||
                    item.author?.id ||
                    (item.user && typeof item.user === 'string' ? item.user : null) ||
-                   (item.id && !item.channels && !item.features && !item.guild ? item.id : null);
+                   (item.id && !item.channels && !item.features && !item.guild && !item.title ? item.id : null);
 
         return uid ? isBlockedOrIgnored(uid) : false;
     }
@@ -399,7 +400,14 @@
         if (!props || typeof props !== 'object') return props;
         const cloned = { ...props };
         if (Array.isArray(props.data)) {
-            cloned.data = cleanChatRows(props.data.filter(it => !isMemberBlockedOrIgnored(it)));
+            // Check if this list is specifically the chat messages scroller
+            const isChatList = props.inverted || props.data.some(it => it && (it.message || it.rowType === 'CHAT_MESSAGE'));
+            if (isChatList) {
+                cloned.data = cleanChatRows(props.data);
+            } else {
+                // For member list and other lists: ONLY filter blocked members, never cleanChatRows!
+                cloned.data = props.data.filter(it => !isMemberBlockedOrIgnored(it));
+            }
         }
         if (typeof props.renderItem === 'function') {
             const origRenderItem = props.renderItem;
@@ -415,7 +423,7 @@
 
     function startPlugin() {
         try {
-            console.log('[MasterSuite Mobile v1.8.0] Starting Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v1.9.0] Starting Antigravity Master Suite...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -448,58 +456,47 @@
                            _revenge.storage ||
                            globalThis.__antigravity_storage ||
                            _storage;
-                if (_storage && Array.isArray(_storage.blockedUserIds)) {
-                    for (const id of _storage.blockedUserIds) blockedUserIdsSet.add(String(id));
-                    if (blockedUserIdsSet.size > 0) isRelationshipsReady = true;
-                }
             }
 
-            // Stores Resolution
-            if (_revenge.discord?.stores) {
-                RelationshipStore = _revenge.discord.stores.RelationshipStore;
-                GuildMemberStore = _revenge.discord.stores.GuildMemberStore;
-                MessageStore = _revenge.discord.stores.MessageStore;
-            }
+            // Resolve Discord Stores
             if (_metro.findByProps) {
-                if (!RelationshipStore) RelationshipStore = _metro.findByProps('isBlocked', 'getRelationships');
-                if (!GuildMemberStore) GuildMemberStore = _metro.findByProps('getMember', 'isMember') || _metro.findByProps('getMember');
-                if (!MessageStore) MessageStore = _metro.findByProps('getMessages', 'getMessage');
-                if (!TypingStore) TypingStore = _metro.findByProps('getTypingUsers');
-                if (!RowManager) RowManager = _metro.findByProps('RowManager')?.RowManager;
-            }
-            if (_metro.findByName && !RowManager) {
-                RowManager = _metro.findByName('RowManager');
+                RelationshipStore = _metro.findByProps('getBlockedUserIds', 'getRelationships') ||
+                                    _metro.findByProps('getRelationships');
+                GuildMemberStore = _metro.findByProps('getMember', 'getMembers');
+                MessageStore = _metro.findByProps('getMessages', 'getMessage');
+                TypingStore = _metro.findByProps('getTypingUsers');
+                RowManager = _metro.findByProps('RowManager')?.RowManager ||
+                             (_metro.findByName && _metro.findByName('RowManager'));
             }
 
-            // Sync Blocked / Ignored Sets from Live Store
+            // Hydrate sets from RelationshipStore if already loaded
             if (RelationshipStore) {
                 try {
-                    const rels = RelationshipStore.getRelationships ? RelationshipStore.getRelationships() : null;
-                    if (rels && typeof rels === 'object' && Object.keys(rels).length > 0) {
-                        for (const [id, type] of Object.entries(rels)) {
-                            if (type === 2) blockedUserIdsSet.add(String(id));
-                            if (type === 5) ignoredUserIdsSet.add(String(id));
-                        }
-                        markRelationshipsReady();
-                    }
-                    if (RelationshipStore.getBlockedUserIds) {
-                        const bIds = RelationshipStore.getBlockedUserIds();
-                        if (Array.isArray(bIds) && bIds.length > 0) {
-                            bIds.forEach(id => blockedUserIdsSet.add(String(id)));
-                            markRelationshipsReady();
+                    if (typeof RelationshipStore.getBlockedUserIds === 'function') {
+                        const bArr = RelationshipStore.getBlockedUserIds();
+                        if (Array.isArray(bArr)) {
+                            bArr.forEach(id => blockedUserIdsSet.add(String(id)));
+                            if (bArr.length > 0) markRelationshipsReady();
                         }
                     }
-                    if (RelationshipStore.getIgnoredUserIds) {
-                        const iIds = RelationshipStore.getIgnoredUserIds();
-                        if (Array.isArray(iIds) && iIds.length > 0) {
-                            iIds.forEach(id => ignoredUserIdsSet.add(String(id)));
+                    if (typeof RelationshipStore.getIgnoredUserIds === 'function') {
+                        const iArr = RelationshipStore.getIgnoredUserIds();
+                        if (Array.isArray(iArr)) iArr.forEach(id => ignoredUserIdsSet.add(String(id)));
+                    }
+                    if (typeof RelationshipStore.getRelationships === 'function') {
+                        const rels = RelationshipStore.getRelationships();
+                        if (rels && typeof rels === 'object') {
+                            for (const [id, type] of Object.entries(rels)) {
+                                if (type === 2) blockedUserIdsSet.add(String(id));
+                                if (type === 5) ignoredUserIdsSet.add(String(id));
+                            }
                             markRelationshipsReady();
                         }
                     }
                 } catch (_) {}
             }
 
-            console.log('[MasterSuite v1.8.0] Tracking', blockedUserIdsSet.size, 'blocked and', ignoredUserIdsSet.size, 'ignored users.');
+            console.log('[MasterSuite v1.9.0] Tracking', blockedUserIdsSet.size, 'blocked and', ignoredUserIdsSet.size, 'ignored users.');
 
             // ========================================================
             // 2. GATEWAY INTERCEPTION (BULLETPROOF ERROR-SAFE DISPATCHER)
@@ -540,16 +537,26 @@
                             }
 
                             // Filter members chunk in small servers like "ihh"
-                            if (event.type === 'GUILD_MEMBERS_CHUNK' && Array.isArray(event.members)) {
-                                event.members = event.members.filter(m => !isMemberBlockedOrIgnored(m));
+                            if (event.type === 'GUILD_MEMBERS_CHUNK') {
+                                if (Array.isArray(event.members)) {
+                                    event.members = event.members.filter(m => !isMemberBlockedOrIgnored(m));
+                                }
+                                if (Array.isArray(event.presences)) {
+                                    event.presences = event.presences.filter(p => !isBlockedOrIgnored(p?.user?.id || p?.userId));
+                                }
                             }
 
                             // Filter initial guild members in GUILD_CREATE
-                            if (event.type === 'GUILD_CREATE' && Array.isArray(event.members)) {
-                                const origLen = event.members.length;
-                                event.members = event.members.filter(m => !isMemberBlockedOrIgnored(m));
-                                const diff = origLen - event.members.length;
-                                if (typeof event.member_count === 'number') event.member_count = Math.max(0, event.member_count - diff);
+                            if (event.type === 'GUILD_CREATE') {
+                                if (Array.isArray(event.members)) {
+                                    const origLen = event.members.length;
+                                    event.members = event.members.filter(m => !isMemberBlockedOrIgnored(m));
+                                    const diff = origLen - event.members.length;
+                                    if (typeof event.member_count === 'number') event.member_count = Math.max(0, event.member_count - diff);
+                                }
+                                if (Array.isArray(event.presences)) {
+                                    event.presences = event.presences.filter(p => !isBlockedOrIgnored(p?.user?.id || p?.userId));
+                                }
                             }
 
                             // Swallow live blocked member additions
@@ -811,7 +818,7 @@
                             const target = args[0];
                             const uid = typeof target === 'string' ? target : (target?.userId || target?.user?.id);
                             if (isBlockedOrIgnored(uid)) {
-                                console.log('[MasterSuite v1.8.0] Suppressed profile open for blocked user:', uid);
+                                console.log('[MasterSuite v1.9.0] Suppressed profile open for blocked user:', uid);
                                 return;
                             }
                             return orig ? orig.apply(this, args) : undefined;
@@ -826,7 +833,7 @@
                     const title = String(args[0] || '');
                     const msg = String(args[1] || '');
                     if (/Show Profile/i.test(title) || /You blocked/i.test(msg) || /blocked/i.test(title)) {
-                        console.log('[MasterSuite v1.8.0] Suppressed Show Profile dialog:', title);
+                        console.log('[MasterSuite v1.9.0] Suppressed Show Profile dialog:', title);
                         return;
                     }
                     return orig ? orig.apply(this, args) : undefined;
@@ -864,28 +871,7 @@
             }
 
             // ========================================================
-            // 6. MEMBER ROW COMPONENT DIRECT INTERCEPTION
-            // ========================================================
-            const memberRowNames = ['MemberRow', 'MemberListItem', 'GuildMemberListItem', 'ChannelMemberRow', 'MemberItem'];
-            for (const name of memberRowNames) {
-                if (_metro.findByProps) {
-                    try {
-                        const mod = _metro.findByProps(name);
-                        if (mod && typeof mod[name] === 'function') {
-                            safePatch('instead', mod, name, function(args, orig) {
-                                const p = args[0] || {};
-                                if (isMemberBlockedOrIgnored(p.item || p.user || p.member || p.userId || p)) {
-                                    return null;
-                                }
-                                return orig ? orig.apply(this, args) : null;
-                            });
-                        }
-                    } catch (_) {}
-                }
-            }
-
-            // ========================================================
-            // 7. FLATLIST & SECTIONLIST (WITH FROZEN PROPS PROTECTION)
+            // 6. FLATLIST & SECTIONLIST (WITH FROZEN PROPS & REF PROTECTION)
             // ========================================================
             const RN = _common.ReactNative || (_metro.findByProps && _metro.findByProps('FlatList', 'SectionList')) || (_metro.findByProps && _metro.findByProps('FlatList'));
             const FlatList = RN?.FlatList || (_metro.findByProps && _metro.findByProps('FlatList')?.FlatList);
@@ -895,7 +881,7 @@
                 if (typeof FlatList.render === 'function') {
                     safePatch('instead', FlatList, 'render', function(args, orig) {
                         const safeProps = getSafeListProps(args[0]);
-                        return orig ? orig.apply(this, [safeProps]) : null;
+                        return orig ? orig.apply(this, [safeProps, ...args.slice(1)]) : null;
                     });
                 }
                 if (FlatList.prototype && typeof FlatList.prototype.render === 'function') {
@@ -918,7 +904,7 @@
                 if (typeof SectionList.render === 'function') {
                     safePatch('instead', SectionList, 'render', function(args, orig) {
                         const safeProps = getSafeSectionProps(args[0]);
-                        return orig ? orig.apply(this, [safeProps]) : null;
+                        return orig ? orig.apply(this, [safeProps, ...args.slice(1)]) : null;
                     });
                 }
                 if (SectionList.prototype && typeof SectionList.prototype.render === 'function') {
@@ -938,7 +924,7 @@
             }
 
             // ========================================================
-            // 8. SAFE MESSAGE RELIABILITY & LRU BOUNDS
+            // 7. SAFE MESSAGE RELIABILITY & LRU BOUNDS
             // ========================================================
             if (_FluxDispatcher) {
                 safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
@@ -949,15 +935,6 @@
                             recentChannels.unshift(event.channelId);
                             if (recentChannels.length > MAX_CHANNELS) {
                                 recentChannels = recentChannels.slice(0, MAX_CHANNELS);
-                                if (MessageStore) {
-                                    const cache = MessageStore._channelMessages || MessageStore._messages;
-                                    if (cache && typeof cache === 'object') {
-                                        const allowed = new Set(recentChannels);
-                                        for (const chId in cache) {
-                                            if (!allowed.has(chId)) delete cache[chId];
-                                        }
-                                    }
-                                }
                             }
                         }
                     } catch (_) {}
@@ -975,7 +952,7 @@
                             if (chId && !recoveryDebounce[chId]) {
                                 recoveryDebounce[chId] = setTimeout(() => {
                                     delete recoveryDebounce[chId];
-                                    console.log('[MessageReliability v1.8.0] Auto-recovering channel:', chId);
+                                    console.log('[MessageReliability v1.9.0] Auto-recovering channel:', chId);
                                     try { MessageActions.fetchMessages({ channelId: chId, limit: 50 }); } catch (_) {}
                                 }, 1200);
                             }
@@ -986,9 +963,9 @@
             }
 
             notifyActive();
-            console.log('[MasterSuite Mobile v1.8.0] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v1.9.0] Antigravity Master Suite loaded and active!');
         } catch (err) {
-            console.error('[MasterSuite Mobile v1.8.0] Error during startup:', err);
+            console.error('[MasterSuite Mobile v1.9.0] Error during startup:', err);
         }
     }
 
@@ -998,7 +975,7 @@
             try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
         }
         unpatches.length = 0;
-        console.log('[MasterSuite Mobile v1.8.0] Unloaded cleanly.');
+        console.log('[MasterSuite Mobile v1.9.0] Unloaded cleanly.');
     }
 
     // Dual lifecycle exports
