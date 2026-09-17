@@ -1,6 +1,6 @@
 {
   "name": "Antigravity Master Suite",
-  "description": "All-in-One: Multi-layer zero-gap memberlist elimination (zero black space, exact header count), orphaned date divider removal, and dynamic relationship tracking.",
+  "description": "All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.",
   "authors": [
     {
       "name": "Antigravity",
@@ -8,6 +8,6 @@
     }
   ],
   "main": "index.js",
-  "version": "2.9.0",
-  "hash": "2169b39539267e412f9b6f264210818bfe6ed748227e6e06fde5a10c7ce3cda0"
+  "version": "3.0.0",
+  "hash": "e420cb5590ebc4c5846565714c2e6145c6297e02762c2f7fc9b23821ea5acfc4"
 }\n

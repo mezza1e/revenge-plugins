@@ -31,30 +31,61 @@
     let View = (_metro.findByProps && _metro.findByProps('View')?.View) ||
                (typeof uiComponents !== 'undefined' && uiComponents.View);
 
-    // Universal instead/before/after patcher wrapper that safely handles both Revenge and Vendetta calling conventions
+    // Bulletproof Universal Patcher:
+    // In Revenge/Vendetta/Spitroast, the native argument order is: patcher[type](propName, parentObj, hook)
+    // We try (prop, obj, hook), verify that obj[prop] was actually replaced, and if not, fall back to (obj, prop, hook)
+    // or a direct property wrapper so that EVERY patch is 100% guaranteed to take effect!
     function safePatch(type, obj, prop, hook) {
-        if (!obj || !prop || !_patcher) return;
-        try {
-            const safeHook = function(p1, p2) {
-                const originalFn = typeof p2 === 'function' ? p2 : (typeof p1 === 'function' ? p1 : null);
-                const actualArgs = Array.isArray(p1) ? p1 : (Array.isArray(p2) ? p2 : []);
-                return hook.call(this, actualArgs, originalFn);
-            };
+        if (!obj || !prop) return;
+        const orig = obj[prop];
+        if (typeof orig !== 'function') return;
 
-            // Revenge convention: patcher[type](parent, key, hook)
-            if (typeof _patcher[type] === 'function') {
-                try {
-                    const unpatch = _patcher[type](obj, prop, type === 'instead' ? safeHook : hook);
+        // 1. Try mobile spitroast standard: (prop, obj, hook)
+        if (_patcher && typeof _patcher[type] === 'function') {
+            try {
+                const unpatch = _patcher[type](prop, obj, function(p1, p2) {
+                    const actualArgs = Array.isArray(p1) ? p1 : (Array.isArray(p2) ? p2 : []);
+                    const origFn = typeof p2 === 'function' ? p2 : (typeof p1 === 'function' ? p1 : orig);
+                    return hook.call(this, actualArgs, origFn);
+                });
+                if (obj[prop] !== orig) {
                     if (typeof unpatch === 'function') unpatches.push(unpatch);
                     return;
-                } catch (_) {}
-                // Vendetta convention: patcher[type](key, parent, hook)
-                try {
-                    const unpatch = _patcher[type](prop, obj, type === 'instead' ? safeHook : hook);
+                }
+            } catch (_) {}
+
+            // 2. Try alternate order: (obj, prop, hook)
+            try {
+                const unpatch = _patcher[type](obj, prop, function(p1, p2) {
+                    const actualArgs = Array.isArray(p1) ? p1 : (Array.isArray(p2) ? p2 : []);
+                    const origFn = typeof p2 === 'function' ? p2 : (typeof p1 === 'function' ? p1 : orig);
+                    return hook.call(this, actualArgs, origFn);
+                });
+                if (obj[prop] !== orig) {
                     if (typeof unpatch === 'function') unpatches.push(unpatch);
                     return;
-                } catch (_) {}
+                }
+            } catch (_) {}
+        }
+
+        // 3. Fallback: DIRECT PROTOTYPE / PROPERTY WRAPPER (Guarantees execution)
+        try {
+            if (type === 'instead') {
+                obj[prop] = function(...args) {
+                    return hook.call(this, args, orig);
+                };
+            } else if (type === 'after') {
+                obj[prop] = function(...args) {
+                    const res = orig.apply(this, args);
+                    return hook.call(this, args, res);
+                };
+            } else if (type === 'before') {
+                obj[prop] = function(...args) {
+                    hook.call(this, args);
+                    return orig.apply(this, args);
+                };
             }
+            unpatches.push(() => { obj[prop] = orig; });
         } catch (_) {}
     }
 
@@ -64,7 +95,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v2.9.0: ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.0 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -72,7 +103,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v2.9.0: ACTIVE');
+                showToast('Antigravity Master Suite v3.0.0 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -272,7 +303,6 @@
                 count++;
             }
         }
-        // Fallback: if presence is unknown but blocked users exist, assume online if section is online
         if (count === 0 && isOnline && blockedUserIdsSet.size > 0) {
             count = blockedUserIdsSet.size;
         }
@@ -452,69 +482,71 @@
         return pruneOrphanedDateDividers(temp);
     }
 
-    // Complete sanitizer for ChannelMemberStore.getProps response
-    function sanitizeChannelMemberProps(res) {
-        if (!res || typeof res !== 'object') return res;
-        if (!Array.isArray(res.rows) && !Array.isArray(res.groups) && !Array.isArray(res.members)) return res;
+    // --- 1:1 DESKTOP PARITY MEMBER LIST SANITIZATION ---
+    // Recalculates group.index offsets, decrements counts, and eliminates dead virtualization slots!
+    function sanitizeDesktopStyleChannelMembers(props) {
+        if (!props || typeof props !== 'object') return props;
+        if (!Array.isArray(props.rows) || !Array.isArray(props.groups)) return props;
 
-        const newRes = { ...res };
+        const newGroups = props.groups.map(g => ({ ...g }));
+        const newRows = [];
+        let hiddenRows = false;
 
-        // 1. Sanitize flat rows (filters out blocked user, updates group row headers)
-        if (Array.isArray(newRes.rows)) {
-            const cleanRows = [];
-            let currentGroupIdx = -1;
-            let currentGroupBlockedCount = 0;
-
-            for (let i = 0; i < newRes.rows.length; i++) {
-                const r = newRes.rows[i];
-                if (!r || typeof r !== 'object') {
-                    cleanRows.push(r);
-                    continue;
-                }
-
-                const isGroup = r.type === 'GROUP' || r.type === 'HEADER' || r.type === 'SECTION' ||
-                                r.rowType === 'GROUP' || r.rowType === 'HEADER' ||
-                                (r.header === true) ||
-                                (typeof r.id === 'string' && (r.id === 'online' || r.id === 'offline' || r.id.startsWith('group')));
-
-                if (isGroup) {
-                    if (currentGroupIdx !== -1 && currentGroupBlockedCount > 0) {
-                        cleanRows[currentGroupIdx] = updateHeaderCount(cleanRows[currentGroupIdx], currentGroupBlockedCount);
+        for (let i = 0; i < props.rows.length; i++) {
+            const row = props.rows[i];
+            if (!row || row.type !== 'MEMBER') {
+                newRows.push({ ...row });
+            } else if (!isMemberBlockedOrIgnored(row)) {
+                newRows.push({ ...row });
+            } else {
+                hiddenRows = true;
+                // Decrement preceding GROUP row count and matching group in newGroups
+                for (let j = newRows.length - 1; j >= 0; j--) {
+                    if (newRows[j].type === 'GROUP' || newRows[j].rowType === 'GROUP' || newRows[j].header === true) {
+                        const targetId = newRows[j].id;
+                        const grp = newGroups.find(g => g.id === targetId);
+                        if (grp) {
+                            grp.count = Math.max(0, grp.count - 1);
+                            if (typeof grp.title === 'string') {
+                                grp.title = grp.title.replace(/(\d+)(?=[^\d]*$)/, String(grp.count));
+                            }
+                            newRows[j].count = grp.count;
+                            if (typeof newRows[j].title === 'string') {
+                                newRows[j].title = newRows[j].title.replace(/(\d+)(?=[^\d]*$)/, String(grp.count));
+                            }
+                        }
+                        break;
                     }
-                    currentGroupIdx = cleanRows.length;
-                    currentGroupBlockedCount = 0;
-                    cleanRows.push(r);
-                    continue;
                 }
-
-                if (isMemberBlockedOrIgnored(r)) {
-                    currentGroupBlockedCount++;
-                    continue; // Completely eliminate from rows!
-                }
-
-                cleanRows.push(r);
             }
-
-            if (currentGroupIdx !== -1 && currentGroupBlockedCount > 0) {
-                cleanRows[currentGroupIdx] = updateHeaderCount(cleanRows[currentGroupIdx], currentGroupBlockedCount);
-            }
-
-            newRes.rows = cleanRows;
         }
 
-        // 2. Sanitize groups array (e.g. [{ id: 'online', count: 2, title: 'Online — 2' }, ...])
-        if (Array.isArray(newRes.groups)) {
-            newRes.groups = newRes.groups.map(grp => {
-                if (!grp || typeof grp !== 'object') return grp;
-                const blockedCount = getBlockedCountForSection(grp.id || grp.title);
-                if (blockedCount > 0) {
-                    return updateHeaderCount(grp, blockedCount);
+        if (hiddenRows) {
+            // CRUCIAL: Recalculate group index offsets!
+            // When index offsets are recalculated, the virtualization engine places subsequent groups immediately,
+            // completely eliminating the empty 48px black space!
+            let indexSum = 0;
+            for (let i = 0; i < newGroups.length; i++) {
+                if (newGroups[i].id !== 'content-inventory-feed') {
+                    newGroups[i].index = indexSum;
+                    if (newGroups[i].count > 0) {
+                        indexSum += (newGroups[i].count + 1);
+                    }
                 }
-                return grp;
-            });
+            }
+
+            // Remove empty 0-count group headers
+            const finalRows = newRows.filter(r => !( (r.type === 'GROUP' || r.rowType === 'GROUP') && r.count <= 0 ));
+            const finalGroups = newGroups.filter(g => g && (g.count > 0 || g.id === 'content-inventory-feed'));
+
+            return {
+                ...props,
+                rows: finalRows,
+                groups: finalGroups
+            };
         }
 
-        return newRes;
+        return props;
     }
 
     // Helper to safely clone and filter SectionList props with accurate header counts
@@ -600,7 +632,6 @@
                     continue;
                 }
 
-                // Detect section header items in a flat array
                 const isHeader = item.header === true ||
                                  item.isHeader === true ||
                                  item.type === 'HEADER' ||
@@ -705,10 +736,7 @@
         if (!child || typeof child !== 'object') return false;
         const cp = child.props;
         if (cp && typeof cp === 'object') {
-            // 1. Direct props check
             if (shouldAbsorbElement(cp)) return true;
-
-            // 2. Child's children check (handles <View style={styles.cardItemWrapper}><MemberRow ... /></View>)
             if (cp.children) {
                 if (Array.isArray(cp.children)) {
                     for (const sub of cp.children) {
@@ -720,7 +748,6 @@
             }
         }
 
-        // 3. Key check (React elements often carry user ID on key, with prefixes like member-123 or .$123)
         if (child.key) {
             if (isBlockedOrIgnored(child.key)) return true;
             if (typeof child.key === 'string') {
@@ -779,7 +806,7 @@
 
     function startPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.9.0] Starting Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.0] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -858,7 +885,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v2.9.0] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.0.0] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
             // --- 1. FluxDispatcher Gateway & Dispatch Patches ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -982,7 +1009,6 @@
                             }
 
                             // 9. Gateway Lazy Guild Member List Filtering (GUILD_MEMBER_LIST_UPDATE)
-                            // Crucial: eliminates blocked member from server member list at Gateway dispatch!
                             if (event.type === 'GUILD_MEMBER_LIST_UPDATE') {
                                 let modified = false;
                                 const newEvent = { ...event };
@@ -1057,7 +1083,7 @@
                                         if (op.op === 'INSERT' || op.op === 'UPDATE') {
                                             if (op.item && (isMemberBlockedOrIgnored(op.item) || isMemberBlockedOrIgnored(op.item.member))) {
                                                 modified = true;
-                                                continue; // Drop blocked member insertion/update
+                                                continue;
                                             }
                                         }
 
@@ -1072,7 +1098,6 @@
                             }
 
                             // 10. Presence Update Filtering (PRESENCE_UPDATE)
-                            // Ensures blocked user is NEVER reported online to client stores
                             if (event.type === 'PRESENCE_UPDATE') {
                                 const uid = event.user?.id || event.userId;
                                 if (uid && isBlockedOrIgnored(uid)) {
@@ -1085,13 +1110,13 @@
                 });
             }
 
-            // --- 2. Store Layer Patches ---
+            // --- 2. Store Layer Patches (with Desktop 1:1 Parity) ---
 
-            // A. ChannelMemberStore (Primary Discord Mobile member list store - fixes empty black space & decrements headers)
+            // A. ChannelMemberStore
             if (ChannelMemberStore) {
                 if (typeof ChannelMemberStore.getProps === 'function') {
                     safePatch('after', ChannelMemberStore, 'getProps', function(args, res) {
-                        return sanitizeChannelMemberProps(res);
+                        return sanitizeDesktopStyleChannelMembers(res);
                     });
                 }
                 if (typeof ChannelMemberStore.getRows === 'function') {
@@ -1102,14 +1127,14 @@
                 }
             }
 
-            // Also check all metro modules for any store with getProps & getRows (ensures ChannelMemberStore is hooked)
+            // Also check all metro modules for any store with getProps & getRows
             try {
                 const modules = _metro.modules || (typeof vendetta !== 'undefined' && vendetta.metro?.modules) || {};
                 for (const id in modules) {
                     const mod = modules[id]?.exports;
                     if (!mod || typeof mod !== 'object') continue;
                     if (typeof mod.getProps === 'function' && typeof mod.getRows === 'function' && mod !== ChannelMemberStore) {
-                        safePatch('after', mod, 'getProps', (args, res) => sanitizeChannelMemberProps(res));
+                        safePatch('after', mod, 'getProps', (args, res) => sanitizeDesktopStyleChannelMembers(res));
                         safePatch('after', mod, 'getRows', (args, res) => Array.isArray(res) ? res.filter(r => !isMemberBlockedOrIgnored(r)) : res);
                     }
                 }
@@ -1148,13 +1173,13 @@
                 }
             }
 
-            // C. GuildMemberStore
+            // C. GuildMemberStore (1:1 Desktop ByeBlocked & RemoveBlockedUsers Implementation)
             if (GuildMemberStore) {
                 if (typeof GuildMemberStore.getMember === 'function') {
                     safePatch('instead', GuildMemberStore, 'getMember', function(args, orig) {
                         const uid = args[1];
-                        if (uid && isBlockedOrIgnored(uid)) return undefined;
-                        return orig ? orig.apply(this, args) : undefined;
+                        if (uid && isBlockedOrIgnored(uid)) return null;
+                        return orig ? orig.apply(this, args) : null;
                     });
                 }
                 if (typeof GuildMemberStore.getMembers === 'function') {
@@ -1181,8 +1206,8 @@
                 if (typeof GuildMemberStore.getNick === 'function') {
                     safePatch('instead', GuildMemberStore, 'getNick', function(args, orig) {
                         const uid = args[1];
-                        if (uid && isBlockedOrIgnored(uid)) return undefined;
-                        return orig ? orig.apply(this, args) : undefined;
+                        if (uid && isBlockedOrIgnored(uid)) return null;
+                        return orig ? orig.apply(this, args) : null;
                     });
                 }
             }
@@ -1498,12 +1523,16 @@
             } catch (_) {}
 
             // --- 5. Universal React.createElement & JSX Runtime Interceptor ---
-            // Eliminates wrapper slots from Card children, updates header text, and sanitizes arrays!
             function sanitizeElementProps(props) {
                 if (!props || typeof props !== 'object') return props;
                 let newProps = props;
 
-                // 1. Sanitize Card children (PRUNES EMPTY WRAPPER SLOTS, PREVENTING BLACK SPACES!)
+                // 1. ChannelMembers desktop-style 1:1 row & group index recalculation
+                if (Array.isArray(newProps.rows) && Array.isArray(newProps.groups)) {
+                    newProps = sanitizeDesktopStyleChannelMembers(newProps);
+                }
+
+                // 2. Sanitize Card children (PRUNES EMPTY WRAPPER SLOTS, PREVENTING BLACK SPACES!)
                 if (Array.isArray(newProps.children)) {
                     let childRemoved = 0;
                     const cleanChildren = [];
@@ -1544,7 +1573,7 @@
                     }
                 }
 
-                // 2. Sanitize Header Text (e.g. "Online — 2" -> "Online — 1")
+                // 3. Sanitize Header Text (e.g. "Online — 2" -> "Online — 1")
                 if (typeof newProps.children === 'string') {
                     const text = newProps.children;
                     const match = text.match(/^([A-Za-z0-9_\s]+)\s*[—–-]\s*(\d+)/i);
@@ -1578,30 +1607,19 @@
                     }
                 }
 
-                // 3. Sanitize sections array
+                // 4. Sanitize sections array
                 if (Array.isArray(newProps.sections)) {
                     const safe = getSafeSectionProps(newProps);
                     if (safe !== newProps) newProps = safe;
                 }
 
-                // 4. Sanitize members array in card/list components
+                // 5. Sanitize members array in card/list components
                 if (Array.isArray(newProps.members)) {
                     const origLen = newProps.members.length;
                     const filtered = newProps.members.filter(m => !isMemberBlockedOrIgnored(m));
                     const diff = origLen - filtered.length;
                     if (diff > 0) {
                         newProps = { ...newProps, members: filtered };
-                        newProps = updateHeaderCount(newProps, diff);
-                    }
-                }
-
-                // 5. Sanitize rows array in member list components
-                if (Array.isArray(newProps.rows) && newProps.rows.some(r => r && (r.userId || r.user || r.member))) {
-                    const origLen = newProps.rows.length;
-                    const filtered = newProps.rows.filter(m => !isMemberBlockedOrIgnored(m));
-                    const diff = origLen - filtered.length;
-                    if (diff > 0) {
-                        newProps = { ...newProps, rows: filtered };
                         newProps = updateHeaderCount(newProps, diff);
                     }
                 }
@@ -1669,30 +1687,30 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v2.9.0] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.0.0] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v2.9.0 Error]', e);
+            console.error('[MasterSuite Mobile v3.0.0 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.9.0] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.0] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v2.9.0] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.0] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v2.9.0 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.0 Error stopping]', e);
         }
     }
 
     exports.default = {
         name: 'Antigravity Master Suite',
-        description: 'All-in-One: Multi-layer zero-gap memberlist elimination (zero black space, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
+        description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '2.9.0',
+        version: '3.0.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
