@@ -1,6 +1,6 @@
 {
   "name": "ByeBlocked",
-  "description": "1:1 mobile port: Completely eliminates blocked messages, bars, typing indicators, reactions, and settings cards from Discord Mobile.",
+  "description": "All-in-One: 100% Blocked user elimination (Chat & Member Lists), LRU Hermes memory optimization, FlatList/FlashList virtualization, and zero 'Messages failed to load' auto-recovery.",
   "authors": [
     {
       "name": "Antigravity",
@@ -8,6 +8,6 @@
     }
   ],
   "main": "index.js",
-  "version": "2.2.0",
-  "hash": "35920ea952698cdeb2f7b9d5fb283a03065b023408ea9f84349b7ec605bd46bc"
+  "version": "2.3.0",
+  "hash": "4d444e9c1e6b6362b0ac5ab047daa148dbb21b2d5c1190bf37e5d2de9f2359f7"
 }
