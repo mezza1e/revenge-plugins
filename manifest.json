@@ -1,18 +1,13 @@
 {
-  "format": 1,
-  "id": "com.antigravity.mastersuite",
   "name": "Antigravity Master Suite",
   "description": "All-in-One: 100% Blocked user elimination, LRU Hermes memory optimization, FlatList virtualization, and zero 'Messages failed to load' auto-recovery.",
-  "author": "Antigravity",
   "authors": [
     {
       "name": "Antigravity",
-      "id": "0"
+      "id": "698947564459917343"
     }
   ],
   "main": "index.js",
   "version": "1.0.0",
-  "dist": {
-    "script": "index.js"
-  }
+  "hash": "06121b469e419be06c6f860d2e7923e12bd59e8060a5ca93606eb30b130bf691"
 }
