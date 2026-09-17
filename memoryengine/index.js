@@ -44,24 +44,6 @@
                         }
                         if (event.type === 'APP_STATE_UPDATE' && event.state === 'background') {
                             if (typeof global !== 'undefined' && typeof global.gc === 'function') global.gc();
-                            if (_common.ReactNative && _common.ReactNative.Image && typeof _common.ReactNative.Image.clearMemoryCache === 'function') {
-                                _common.ReactNative.Image.clearMemoryCache();
-                            }
-                        }
-                    })
-                );
-            }
-
-            const FlatList = _common.ReactNative?.FlatList || (_metro.findByProps && _metro.findByProps('FlatList')?.FlatList);
-            if (FlatList && FlatList.render) {
-                unpatches.push(
-                    _patcher.before('render', FlatList, (args) => {
-                        const props = args[0];
-                        if (props && typeof props === 'object') {
-                            props.removeClippedSubviews = true;
-                            if (props.maxToRenderPerBatch === undefined || props.maxToRenderPerBatch > 10) {
-                                props.maxToRenderPerBatch = 8;
-                            }
                         }
                     })
                 );
