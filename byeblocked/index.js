@@ -57,7 +57,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v2.1.0: ACTIVE'
+                    content: 'Antigravity Master Suite v2.2.0: ACTIVE'
                 });
                 return;
             }
@@ -65,7 +65,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v2.1.0: ACTIVE');
+                showToast('Antigravity Master Suite v2.2.0: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -187,14 +187,14 @@
                     delete msg.messageReference;
                     delete msg.message_reference;
                     if (typeof msg.type === 'number' && msg.type === 19) {
-                        msg.type = 0; // Standard chat message type
+                        msg.type = 0; // Standard chat message type: completely removes reply string
                     }
                 }
             }
         } catch (_) {}
     }
 
-    // Hermes memory optimization: LRU channel cleanup
+    // Hermes memory optimization: LRU channel cleanup (safe eviction of whole channel cache)
     function trimChannelMessages(keepChannelId) {
         if (!MessageStore) return;
         try {
@@ -210,6 +210,7 @@
         } catch (_) {}
     }
 
+    // Sanitize cached messages without mutating ChannelMessages structure
     function sanitizeChannelCache(chId) {
         if (!MessageStore) return;
         try {
@@ -218,27 +219,11 @@
             const ch = cache[chId];
             if (!ch) return;
 
-            if (Array.isArray(ch._array)) {
-                ch._array = ch._array.filter(m => {
-                    if (!m) return false;
-                    if (isBlockedOrIgnored(m.author?.id) || blockedMessageIdsSet.has(String(m.id))) {
-                        if (m.id) blockedMessageIdsSet.add(String(m.id));
-                        return false;
-                    }
-                    sanitizeMessage(m);
-                    return true;
-                });
-            }
-
+            // Safely sanitize content in-place without deleting map keys or altering array indices
             if (ch._map && typeof ch._map === 'object') {
                 for (const mid in ch._map) {
                     const m = ch._map[mid];
-                    if (isBlockedOrIgnored(m?.author?.id)) {
-                        blockedMessageIdsSet.add(String(mid));
-                        delete ch._map[mid];
-                    } else {
-                        sanitizeMessage(m);
-                    }
+                    if (m) sanitizeMessage(m);
                 }
             }
         } catch (_) {}
@@ -250,7 +235,7 @@
         const temp = [];
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            if (!row) continue;
+            if (!row || typeof row !== 'object' || row.type == null) continue;
             // Drop blocked group (type 2) or message from blocked user
             if (row.type === 2 || row.rowType === 2) continue;
             if (row.message && (isBlockedOrIgnored(row.message.author?.id) || blockedMessageIdsSet.has(String(row.message.id)))) continue;
@@ -267,13 +252,13 @@
         const cleaned = [];
         for (let i = 0; i < temp.length; i++) {
             const row = temp[i];
-            if (!row) continue;
+            if (!row || typeof row !== 'object' || row.type == null) continue;
             const isDivider = row.type === 3 || row.rowType === 3 || row.type === 'DIVIDER' || (typeof row.id === 'string' && row.id.startsWith('divider'));
             if (isDivider) {
                 let hasContentBelow = false;
                 for (let j = i + 1; j < temp.length; j++) {
                     const next = temp[j];
-                    if (!next) continue;
+                    if (!next || typeof next !== 'object' || next.type == null) continue;
                     const nextIsDivider = next.type === 3 || next.rowType === 3 || next.type === 'DIVIDER' || (typeof next.id === 'string' && next.id.startsWith('divider'));
                     if (nextIsDivider) break;
                     hasContentBelow = true;
@@ -338,12 +323,10 @@
         if (!props || typeof props !== 'object') return props;
         const cloned = { ...props };
         if (Array.isArray(props.data)) {
-            // Check if this list is specifically the chat messages scroller
             const isChatList = props.inverted || props.data.some(it => it && (it.message || it.rowType === 'CHAT_MESSAGE'));
             if (isChatList) {
                 cloned.data = cleanChatRows(props.data);
             } else {
-                // For member list and other lists: ONLY filter blocked members, never cleanChatRows!
                 cloned.data = props.data.filter(it => !isMemberBlockedOrIgnored(it));
             }
         }
@@ -361,7 +344,7 @@
 
     function startPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.1.0] Starting Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v2.2.0] Starting Antigravity Master Suite...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -419,7 +402,7 @@
                 } catch (_) {}
             }
 
-            console.log(`[MasterSuite v2.1.0] Tracking ${blockedUserIdsSet.size} blocked and ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v2.2.0] Tracking ${blockedUserIdsSet.size} blocked and ${ignoredUserIdsSet.size} ignored users.`);
 
             // --- 1. FluxDispatcher (Safe Gateway Passthrough + Message/Relationship Handler) ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -514,7 +497,6 @@
                             }
                         } catch (_) {}
                     }
-                    // Crucial: Always dispatch untouched event to preserve Gateway connection
                     return orig ? orig.apply(this, args) : null;
                 });
             }
@@ -553,38 +535,16 @@
                 }
             }
 
-            // B. MessageStore (Sanitize cached messages and replies)
-            if (MessageStore) {
-                if (typeof MessageStore.getMessages === 'function') {
-                    safePatch('after', MessageStore, 'getMessages', function(args, res) {
-                        if (!res) return res;
-                        if (typeof res.filter === 'function') {
-                            return res.filter(m => !isBlockedOrIgnored(m?.author?.id) && !blockedMessageIdsSet.has(String(m?.id)));
-                        }
-                        if (Array.isArray(res)) {
-                            return res.filter(m => !isBlockedOrIgnored(m?.author?.id) && !blockedMessageIdsSet.has(String(m?.id)));
-                        }
-                        if (typeof res.toArray === 'function') {
-                            const origToArray = res.toArray.bind(res);
-                            res.toArray = function() {
-                                return origToArray().filter(m => !isBlockedOrIgnored(m?.author?.id) && !blockedMessageIdsSet.has(String(m?.id)));
-                            };
-                        }
-                        return res;
-                    });
-                }
-                if (typeof MessageStore.getMessage === 'function') {
-                    safePatch('instead', MessageStore, 'getMessage', function(args, orig) {
-                        const msg = orig ? orig.apply(this, args) : null;
-                        if (msg && isBlockedOrIgnored(msg.author?.id)) return undefined;
-                        if (msg) sanitizeMessage(msg);
-                        return msg;
-                    });
-                }
+            // B. MessageStore (Sanitize message replies in-place without deleting map keys or returning undefined)
+            if (MessageStore && typeof MessageStore.getMessage === 'function') {
+                safePatch('after', MessageStore, 'getMessage', function(args, res) {
+                    if (res) sanitizeMessage(res);
+                    return res;
+                });
             }
 
             // C. RowManager (Chat Rows & Zero Gaps & Reply Sanitization)
-            // NEVER return null from generate - returning null corrupts Discord's row list and crashes createRow with TypeError!
+            // NEVER return null from generate - returning null corrupts Discord's row list and crashes createRow!
             if (RowManager && RowManager.prototype) {
                 safePatch('before', RowManager.prototype, 'generate', function(args) {
                     const data = args[0];
@@ -658,7 +618,51 @@
                 }
             }
 
-            // D. Defensive Guards for createRow & updateRows (Prevents null crashes)
+            // D. Comprehensive Defensive Guards for updateRows and createRow across Metro modules
+            try {
+                const modules = _metro.modules || (typeof vendetta !== 'undefined' && vendetta.metro?.modules) || {};
+                for (const id in modules) {
+                    const mod = modules[id]?.exports;
+                    if (!mod || typeof mod !== 'object') continue;
+
+                    // Guard updateRows on any module exporting it
+                    if (typeof mod.updateRows === 'function') {
+                        safePatch('before', mod, 'updateRows', function(args) {
+                            for (let i = 0; i < args.length; i++) {
+                                if (Array.isArray(args[i])) {
+                                    args[i] = args[i].filter(r => r && typeof r === 'object' && r.type != null);
+                                }
+                            }
+                        });
+                    }
+
+                    // Guard createRow on any module exporting it
+                    if (typeof mod.createRow === 'function') {
+                        safePatch('instead', mod, 'createRow', function(args, orig) {
+                            const row = args[0];
+                            if (!row || typeof row !== 'object' || row.type == null) {
+                                return null;
+                            }
+                            return orig ? orig.apply(this, args) : null;
+                        });
+                    }
+                }
+            } catch (_) {}
+
+            // Direct finder guards for updateRows & createRow
+            try {
+                const ChatModule = _metro.findByProps('updateRows');
+                if (ChatModule && typeof ChatModule.updateRows === 'function') {
+                    safePatch('before', ChatModule, 'updateRows', function(args) {
+                        for (let i = 0; i < args.length; i++) {
+                            if (Array.isArray(args[i])) {
+                                args[i] = args[i].filter(r => r && typeof r === 'object' && r.type != null);
+                            }
+                        }
+                    });
+                }
+            } catch (_) {}
+
             try {
                 const RowCreator = _metro.findByProps('createRow');
                 if (RowCreator && typeof RowCreator.createRow === 'function') {
@@ -668,19 +672,6 @@
                             return null;
                         }
                         return orig ? orig.apply(this, args) : null;
-                    });
-                }
-            } catch (_) {}
-
-            try {
-                const ChatModule = _metro.findByProps('updateRows');
-                if (ChatModule && typeof ChatModule.updateRows === 'function') {
-                    safePatch('before', ChatModule, 'updateRows', function(args) {
-                        for (let i = 0; i < args.length; i++) {
-                            if (Array.isArray(args[i])) {
-                                args[i] = args[i].filter(Boolean);
-                            }
-                        }
                     });
                 }
             } catch (_) {}
@@ -849,22 +840,22 @@
             }
 
             notifyActive();
-            console.log('[MasterSuite Mobile v2.1.0] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v2.2.0] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v2.1.0 Error]', e);
+            console.error('[MasterSuite Mobile v2.2.0 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.1.0] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v2.2.0] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v2.1.0] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v2.2.0] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v2.1.0 Error stopping]', e);
+            console.error('[MasterSuite Mobile v2.2.0 Error stopping]', e);
         }
     }
 
@@ -872,7 +863,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 100% Blocked user elimination, LRU Hermes memory optimization, FlatList virtualization, and zero \'Messages failed to load\' auto-recovery.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '2.1.0',
+        version: '2.2.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
