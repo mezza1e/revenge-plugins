@@ -1,0 +1,18 @@
+﻿{
+  "format": 1,
+  "id": "com.antigravity.byeblocked",
+  "name": "ByeBlocked",
+  "description": "1:1 mobile port: Completely eliminates blocked messages, bars, typing indicators, reactions, and settings cards from Discord Mobile.",
+  "author": "Antigravity",
+  "authors": [
+    {
+      "name": "Antigravity",
+      "id": "0"
+    }
+  ],
+  "main": "index.js",
+  "version": "1.0.0",
+  "dist": {
+    "script": "index.js"
+  }
+}
