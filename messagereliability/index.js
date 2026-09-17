@@ -1,6 +1,3 @@
-/**
- * DiscordMessageReliability for Revengecord / Vendetta / Bunny
- */
 (function(exports, metroCommon, patcher, metro, vendetta, plugin, storage, uiComponents) {
     'use strict';
 
