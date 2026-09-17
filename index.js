@@ -57,7 +57,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v2.0.0: ACTIVE'
+                    content: 'Antigravity Master Suite v2.1.0: ACTIVE'
                 });
                 return;
             }
@@ -65,7 +65,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v2.0.0: ACTIVE');
+                showToast('Antigravity Master Suite v2.1.0: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -85,46 +85,39 @@
     let TypingStore = null;
     let RowManager = null;
 
-    // Loading Gate: prevents cached blocked user messages/members from flashing on startup/updates
-    let isRelationshipsReady = false;
-
     // IMMEDIATE ZERO-LATENCY CACHE RESTORATION (Triple-redundant synchronous store):
     try {
-        // Source 1: Plugin persistent storage
         if (_storage && Array.isArray(_storage.blockedUserIds)) {
             for (const id of _storage.blockedUserIds) blockedUserIdsSet.add(String(id));
         }
         if (_storage && Array.isArray(_storage.ignoredUserIds)) {
             for (const id of _storage.ignoredUserIds) ignoredUserIdsSet.add(String(id));
         }
-        // Source 2: LocalStorage / MMKV if available
         if (typeof localStorage !== 'undefined' && localStorage.getItem) {
-            const rawB = localStorage.getItem('antigravity_blocked_ids');
-            if (rawB) {
-                const arr = JSON.parse(rawB);
-                if (Array.isArray(arr)) arr.forEach(id => blockedUserIdsSet.add(String(id)));
+            const b = localStorage.getItem('antigravity_blocked_ids');
+            if (b) {
+                const parsed = JSON.parse(b);
+                if (Array.isArray(parsed)) {
+                    for (const id of parsed) blockedUserIdsSet.add(String(id));
+                }
             }
-            const rawI = localStorage.getItem('antigravity_ignored_ids');
-            if (rawI) {
-                const arr = JSON.parse(rawI);
-                if (Array.isArray(arr)) arr.forEach(id => ignoredUserIdsSet.add(String(id)));
+            const ig = localStorage.getItem('antigravity_ignored_ids');
+            if (ig) {
+                const parsed = JSON.parse(ig);
+                if (Array.isArray(parsed)) {
+                    for (const id of parsed) ignoredUserIdsSet.add(String(id));
+                }
             }
         }
-        // Source 3: Global memory across re-evaluations
         if (typeof globalThis !== 'undefined') {
             if (Array.isArray(globalThis.__antigravity_blocked_ids)) {
-                globalThis.__antigravity_blocked_ids.forEach(id => blockedUserIdsSet.add(String(id)));
+                for (const id of globalThis.__antigravity_blocked_ids) blockedUserIdsSet.add(String(id));
             }
             if (Array.isArray(globalThis.__antigravity_ignored_ids)) {
-                globalThis.__antigravity_ignored_ids.forEach(id => ignoredUserIdsSet.add(String(id)));
+                for (const id of globalThis.__antigravity_ignored_ids) ignoredUserIdsSet.add(String(id));
             }
         }
     } catch (_) {}
-
-    // If persistent storage already had blocked users, we are ready instantly at 0ms!
-    if (blockedUserIdsSet.size > 0) {
-        isRelationshipsReady = true;
-    }
 
     function persistBlockedSets() {
         try {
@@ -148,8 +141,6 @@
     }
 
     function markRelationshipsReady() {
-        if (isRelationshipsReady) return;
-        isRelationshipsReady = true;
         persistBlockedSets();
         try {
             if (MessageStore && typeof MessageStore.emitChange === 'function') MessageStore.emitChange();
@@ -158,143 +149,87 @@
         } catch (_) {}
     }
 
-    // Safety timeout fallback: unlock after 2.5s if account has 0 blocked users or is offline
-    setTimeout(() => {
-        markRelationshipsReady();
-    }, 2500);
-
     function isBlockedOrIgnored(userId) {
         if (!userId) return false;
         const s = String(userId);
         return blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s);
     }
 
-    // Robust member check matching any Discord member / user object structure
     function isMemberBlockedOrIgnored(item) {
-        if (!item) return false;
-        if (typeof item === 'string') return isBlockedOrIgnored(item);
-        if (typeof item !== 'object') return false;
-
-        // Never match headers, dividers, guilds, channels, or folders
-        if (item.type === 'HEADER' || item.type === 1 || item.header) return false;
+        if (!item || typeof item !== 'object') return false;
         if (item.guild || item.channel) return false;
-        if (item.features || item.mfaLevel !== undefined || item.vanityURLCode !== undefined) return false;
-        if (item.bitrate !== undefined || item.topic !== undefined || item.rateLimitPerUser !== undefined) return false;
-        if (item.type === 'GUILD' || item.type === 'CHANNEL' || item.type === 'FOLDER') return false;
-
-        const uid = item.userId ||
-                   item.user?.id ||
-                   item.member?.user?.id ||
-                   item.member?.userId ||
-                   item.memberId ||
-                   item.author?.id ||
-                   (item.user && typeof item.user === 'string' ? item.user : null) ||
-                   (item.id && !item.channels && !item.features && !item.guild && !item.title && item.type !== 'GUILD' ? item.id : null);
-
-        return uid ? isBlockedOrIgnored(uid) : false;
-    }
-
-    // Strict inspector for Settings rows only
-    function isSettingsBlockedSection(val, depth = 0) {
-        if (!val || depth > 5) return false;
-        if (typeof val === 'string') {
-            return /accounts you've blocked or ignored|^blocked accounts|^ignored accounts/i.test(val);
-        }
-        if (typeof val === 'object') {
-            for (const k of ['label', 'text', 'title', 'header']) {
-                if (val[k] && typeof val[k] === 'string' && isSettingsBlockedSection(val[k], depth + 1)) return true;
-            }
-            if (val.props && isSettingsBlockedSection(val.props, depth + 1)) return true;
-        }
+        if (item.user && isBlockedOrIgnored(item.user.id)) return true;
+        if (item.member && item.member.user && isBlockedOrIgnored(item.member.user.id)) return true;
+        if (item.userId && isBlockedOrIgnored(item.userId)) return true;
+        if (item.id && (isBlockedOrIgnored(item.id) || (item.user && isBlockedOrIgnored(item.user.id)))) return true;
         return false;
     }
 
-    // Check if message is a reply to a blocked user
-    function isReplyToBlocked(msg) {
-        if (!msg || typeof msg !== 'object') return false;
-        try {
-            const ref = msg.referenced_message || msg.referencedMessage;
-            if (ref) {
-                if (ref.author && isBlockedOrIgnored(ref.author.id)) {
-                    if (ref.id) blockedMessageIdsSet.add(String(ref.id));
-                    return true;
-                }
-                if (ref.state === 'BLOCKED' || ref.state === 2) return true;
-                if (ref.id && blockedMessageIdsSet.has(String(ref.id))) return true;
-            }
-
-            const refRef = msg.message_reference || msg.messageReference;
-            if (refRef) {
-                const authorId = refRef.author_id || refRef.authorId || refRef.user_id || refRef.userId;
-                if (authorId && isBlockedOrIgnored(authorId)) return true;
-
-                const refMsgId = refRef.message_id || refRef.messageId;
-                if (refMsgId && blockedMessageIdsSet.has(String(refMsgId))) return true;
-
-                const refChId = refRef.channel_id || refRef.channelId || msg.channel_id || msg.channelId;
-                if (refMsgId && refChId && MessageStore && typeof MessageStore.getMessage === 'function') {
-                    try {
-                        const cached = MessageStore.getMessage(refChId, refMsgId);
-                        if (cached && cached.author && isBlockedOrIgnored(cached.author.id)) {
-                            blockedMessageIdsSet.add(String(refMsgId));
-                            return true;
-                        }
-                    } catch (_) {}
-                }
-            }
-        } catch (_) {}
-        return false;
+    function isSettingsBlockedSection(sectionOrTitle) {
+        if (!sectionOrTitle) return false;
+        const text = typeof sectionOrTitle === 'string' ? sectionOrTitle : (sectionOrTitle.title || sectionOrTitle.header || sectionOrTitle.key || '');
+        if (typeof text !== 'string') return false;
+        const lower = text.toLowerCase();
+        return lower.includes('blocked user') || lower.includes('blocked') || lower.includes('ignored');
     }
 
-    // Convert reply referencing a blocked user into a 100% normal message (type 0, zero reply strings)
-    function convertReplyToNormalMessage(msg) {
-        if (!msg || typeof msg !== 'object') return;
-        try {
-            msg.type = 0; // MessageType.DEFAULT (0) prevents Discord from rendering any reply string
-            delete msg.message_reference;
-            delete msg.messageReference;
-            delete msg.referenced_message;
-            delete msg.referencedMessage;
-            delete msg.reply;
-
-            if (msg.message && typeof msg.message === 'object') {
-                msg.message.type = 0;
-                delete msg.message.message_reference;
-                delete msg.message.messageReference;
-                delete msg.message.referenced_message;
-                delete msg.message.referencedMessage;
-                delete msg.message.reply;
-            }
-        } catch (_) {}
-    }
-
-    // Sanitize any message: if reply to blocked, convert to standard message
+    // Strip reply quote and reference if original message was from a blocked user
     function sanitizeMessage(msg) {
         if (!msg || typeof msg !== 'object') return;
-        if (msg.author && isBlockedOrIgnored(msg.author.id)) {
-            if (msg.id) blockedMessageIdsSet.add(String(msg.id));
-            return;
-        }
-        if (isReplyToBlocked(msg)) {
-            convertReplyToNormalMessage(msg);
-        }
+        try {
+            const refMsg = msg.referenced_message || msg.referencedMessage;
+            if (refMsg) {
+                const refAuthorId = refMsg.author?.id || refMsg.authorId;
+                const refMsgId = refMsg.id;
+                if (isBlockedOrIgnored(refAuthorId) || blockedMessageIdsSet.has(String(refMsgId))) {
+                    delete msg.referenced_message;
+                    delete msg.referencedMessage;
+                    delete msg.messageReference;
+                    delete msg.message_reference;
+                    if (typeof msg.type === 'number' && msg.type === 19) {
+                        msg.type = 0; // Standard chat message type
+                    }
+                }
+            }
+        } catch (_) {}
     }
 
-    // Deep message collection sanitizer (purges array and map caches)
-    function cleanMessageCollection(ch) {
-        if (!ch || typeof ch !== 'object') return;
+    // Hermes memory optimization: LRU channel cleanup
+    function trimChannelMessages(keepChannelId) {
+        if (!MessageStore) return;
         try {
+            const cache = MessageStore._channelMessages || MessageStore._messages;
+            if (!cache || typeof cache !== 'object') return;
+            const channelKeys = Object.keys(cache);
+            if (channelKeys.length <= MAX_CHANNELS) return;
+
+            for (const chId of channelKeys) {
+                if (chId === keepChannelId || recentChannels.includes(chId)) continue;
+                delete cache[chId];
+            }
+        } catch (_) {}
+    }
+
+    function sanitizeChannelCache(chId) {
+        if (!MessageStore) return;
+        try {
+            const cache = MessageStore._channelMessages || MessageStore._messages;
+            if (!cache || typeof cache !== 'object') return;
+            const ch = cache[chId];
+            if (!ch) return;
+
             if (Array.isArray(ch._array)) {
                 ch._array = ch._array.filter(m => {
                     if (!m) return false;
-                    if (isBlockedOrIgnored(m.author?.id)) {
+                    if (isBlockedOrIgnored(m.author?.id) || blockedMessageIdsSet.has(String(m.id))) {
                         if (m.id) blockedMessageIdsSet.add(String(m.id));
                         return false;
                     }
+                    sanitizeMessage(m);
                     return true;
                 });
-                for (const m of ch._array) sanitizeMessage(m);
             }
+
             if (ch._map && typeof ch._map === 'object') {
                 for (const mid in ch._map) {
                     const m = ch._map[mid];
@@ -332,11 +267,13 @@
         const cleaned = [];
         for (let i = 0; i < temp.length; i++) {
             const row = temp[i];
+            if (!row) continue;
             const isDivider = row.type === 3 || row.rowType === 3 || row.type === 'DIVIDER' || (typeof row.id === 'string' && row.id.startsWith('divider'));
             if (isDivider) {
                 let hasContentBelow = false;
                 for (let j = i + 1; j < temp.length; j++) {
                     const next = temp[j];
+                    if (!next) continue;
                     const nextIsDivider = next.type === 3 || next.rowType === 3 || next.type === 'DIVIDER' || (typeof next.id === 'string' && next.id.startsWith('divider'));
                     if (nextIsDivider) break;
                     hasContentBelow = true;
@@ -424,7 +361,7 @@
 
     function startPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.0.0] Starting Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v2.1.0] Starting Antigravity Master Suite...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -437,11 +374,11 @@
             }
             if (!_metro || typeof _metro.findByProps !== 'function') {
                 _metro = (typeof metro !== 'undefined' && metro) ||
-                         _revenge.modules?.finders ||
-                         _vendetta.metro ||
-                         globalThis.vendetta?.metro ||
-                         globalThis.revenge?.modules?.finders ||
-                         _metro;
+                          _revenge.modules?.finders ||
+                          _vendetta.metro ||
+                          globalThis.vendetta?.metro ||
+                          globalThis.revenge?.modules?.finders ||
+                          _metro;
             }
             if (!_FluxDispatcher) {
                 _FluxDispatcher = _revenge.discord?.flux?.Dispatcher ||
@@ -449,19 +386,10 @@
                                   _common.FluxDispatcher ||
                                   (_metro.findByProps && (_metro.findByProps('dispatch', 'subscribe') || _metro.findByProps('dispatch')));
             }
-            if (!_storage || Object.keys(_storage).length === 0) {
-                _storage = (typeof storage !== 'undefined' && storage) ||
-                           (typeof plugin !== 'undefined' && plugin?.storage) ||
-                           _vendetta.plugin?.storage ||
-                           _vendetta.storage ||
-                           _revenge.storage ||
-                           globalThis.__antigravity_storage ||
-                           _storage;
-            }
 
-            // Resolve Discord Stores
             if (_metro.findByProps) {
-                RelationshipStore = _metro.findByProps('getBlockedUserIds', 'getRelationships') ||
+                RelationshipStore = _metro.findByProps('getRelationships', 'isBlocked') ||
+                                    _metro.findByProps('isBlocked') ||
                                     _metro.findByProps('getRelationships');
                 GuildMemberStore = _metro.findByProps('getMember', 'getMembers');
                 MessageStore = _metro.findByProps('getMessages', 'getMessage');
@@ -473,40 +401,32 @@
             // Hydrate sets from RelationshipStore if already loaded
             if (RelationshipStore) {
                 try {
-                    if (typeof RelationshipStore.getBlockedUserIds === 'function') {
-                        const bArr = RelationshipStore.getBlockedUserIds();
-                        if (Array.isArray(bArr)) {
-                            bArr.forEach(id => blockedUserIdsSet.add(String(id)));
-                            if (bArr.length > 0) markRelationshipsReady();
+                    const rels = RelationshipStore.getRelationships();
+                    if (rels && typeof rels === 'object') {
+                        for (const uid in rels) {
+                            if (rels[uid] === 2) blockedUserIdsSet.add(String(uid));
+                            if (rels[uid] === 5) ignoredUserIdsSet.add(String(uid));
                         }
+                        persistBlockedSets();
                     }
-                    if (typeof RelationshipStore.getIgnoredUserIds === 'function') {
-                        const iArr = RelationshipStore.getIgnoredUserIds();
-                        if (Array.isArray(iArr)) iArr.forEach(id => ignoredUserIdsSet.add(String(id)));
-                    }
-                    if (typeof RelationshipStore.getRelationships === 'function') {
-                        const rels = RelationshipStore.getRelationships();
-                        if (rels && typeof rels === 'object') {
-                            for (const [id, type] of Object.entries(rels)) {
-                                if (type === 2) blockedUserIdsSet.add(String(id));
-                                if (type === 5) ignoredUserIdsSet.add(String(id));
-                            }
-                            markRelationshipsReady();
+                    if (typeof RelationshipStore.getBlockedUserIds === 'function') {
+                        const bIds = RelationshipStore.getBlockedUserIds();
+                        if (Array.isArray(bIds)) {
+                            for (const id of bIds) blockedUserIdsSet.add(String(id));
+                            persistBlockedSets();
                         }
                     }
                 } catch (_) {}
             }
 
-            console.log('[MasterSuite v2.0.0] Tracking', blockedUserIdsSet.size, 'blocked and', ignoredUserIdsSet.size, 'ignored users.');
+            console.log(`[MasterSuite v2.1.0] Tracking ${blockedUserIdsSet.size} blocked and ${ignoredUserIdsSet.size} ignored users.`);
 
-            // ========================================================
-            // 2. UNIFIED ERROR-SAFE GATEWAY DISPATCHER HOOK (NEVER MUTATE GUILD CREATION)
-            // ========================================================
+            // --- 1. FluxDispatcher (Safe Gateway Passthrough + Message/Relationship Handler) ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
                 safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
-                    try {
-                        const event = args[0];
-                        if (event && typeof event === 'object') {
+                    const event = args[0];
+                    if (event && typeof event === 'object') {
+                        try {
                             // 1. Sync relationship events
                             if (event.type === 'RELATIONSHIP_ADD' && event.relationship) {
                                 const rid = String(event.relationship.id);
@@ -556,7 +476,8 @@
                             if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && event.message) {
                                 if (isBlockedOrIgnored(event.message.author?.id)) {
                                     if (event.message.id) blockedMessageIdsSet.add(String(event.message.id));
-                                    return; // Silently swallow blocked user message
+                                    event.channelId = "0"; // Safely drop from active channel
+                                    return;
                                 }
                                 sanitizeMessage(event.message);
                             }
@@ -570,56 +491,42 @@
                             if (event.type === 'CHANNEL_SELECT' && event.channelId) {
                                 recentChannels = recentChannels.filter(id => id !== event.channelId);
                                 recentChannels.unshift(event.channelId);
-                                if (recentChannels.length > MAX_CHANNELS) {
-                                    recentChannels = recentChannels.slice(0, MAX_CHANNELS);
-                                }
+                                if (recentChannels.length > MAX_CHANNELS) recentChannels.pop();
+                                sanitizeChannelCache(event.channelId);
+                                trimChannelMessages(event.channelId);
                             }
 
-                            // 7. Silent auto-recovery on message load failure
-                            if (event.type === 'LOAD_MESSAGES_FAILURE' || event.type === 'MESSAGE_FETCH_FAILED') {
+                            // 7. Auto-recover from "Messages failed to load"
+                            if (event.type === 'LOAD_MESSAGES_FAILURE' && event.channelId) {
                                 const chId = event.channelId;
-                                if (chId && !recoveryDebounce[chId]) {
-                                    recoveryDebounce[chId] = setTimeout(() => {
-                                        delete recoveryDebounce[chId];
-                                        const MessageActions = _metro.findByProps ? _metro.findByProps('fetchMessages') : null;
-                                        try { MessageActions?.fetchMessages({ channelId: chId, limit: 50 }); } catch (_) {}
-                                    }, 1200);
+                                const now = Date.now();
+                                if (!recoveryDebounce[chId] || now - recoveryDebounce[chId] > 3000) {
+                                    recoveryDebounce[chId] = now;
+                                    setTimeout(() => {
+                                        try {
+                                            const MessageActions = _metro.findByProps('fetchMessages');
+                                            if (MessageActions && typeof MessageActions.fetchMessages === 'function') {
+                                                MessageActions.fetchMessages({ channelId: chId, limit: 50 });
+                                            }
+                                        } catch (_) {}
+                                    }, 200);
                                 }
                             }
-                        }
-                    } catch (err) {
-                        console.error('[MasterSuite Dispatch Hook Error]', err);
+                        } catch (_) {}
                     }
-
-                    // ALWAYS call orig so GuildStore, ChannelStore, Gateway, and Discord internal state machines NEVER break!
-                    return orig ? orig.apply(this, args) : undefined;
+                    // Crucial: Always dispatch untouched event to preserve Gateway connection
+                    return orig ? orig.apply(this, args) : null;
                 });
             }
 
-            // ========================================================
-            // 3. STORE INTERCEPTION (USING FOOLPROOF 'INSTEAD' PATTERN)
-            // ========================================================
+            // --- 2. Store Layer Patches ---
 
-            // A. GuildMemberStore (Purges blocked members in all servers)
+            // A. GuildMemberStore (Filter Blocked Users from Member Queries)
             if (GuildMemberStore) {
-                try {
-                    const cache = GuildMemberStore._members || GuildMemberStore._guildMembers || GuildMemberStore.members;
-                    if (cache && typeof cache === 'object') {
-                        for (const gid in cache) {
-                            const guildMap = cache[gid];
-                            if (guildMap && typeof guildMap === 'object') {
-                                for (const uid in guildMap) {
-                                    if (isBlockedOrIgnored(uid)) delete guildMap[uid];
-                                }
-                            }
-                        }
-                    }
-                } catch (_) {}
-
                 if (typeof GuildMemberStore.getMember === 'function') {
                     safePatch('instead', GuildMemberStore, 'getMember', function(args, orig) {
-                        const uid = args[1];
-                        if (isBlockedOrIgnored(uid)) return undefined;
+                        const userId = args[1];
+                        if (isBlockedOrIgnored(userId)) return undefined;
                         return orig ? orig.apply(this, args) : undefined;
                     });
                 }
@@ -627,7 +534,7 @@
                     safePatch('instead', GuildMemberStore, 'getMembers', function(args, orig) {
                         const res = orig ? orig.apply(this, args) : [];
                         if (!Array.isArray(res)) return res;
-                        return res.filter(m => !isMemberBlockedOrIgnored(m));
+                        return res.filter(m => !isBlockedOrIgnored(m?.userId || (m?.user && m?.user?.id)));
                     });
                 }
                 if (typeof GuildMemberStore.getMemberIds === 'function') {
@@ -639,35 +546,29 @@
                 }
                 if (typeof GuildMemberStore.isMember === 'function') {
                     safePatch('instead', GuildMemberStore, 'isMember', function(args, orig) {
-                        const uid = args[1];
-                        if (isBlockedOrIgnored(uid)) return false;
+                        const userId = args[1];
+                        if (isBlockedOrIgnored(userId)) return false;
                         return orig ? orig.apply(this, args) : false;
                     });
                 }
             }
 
-            // B. MessageStore (Deep Cache Purging & Clean Replies)
+            // B. MessageStore (Sanitize cached messages and replies)
             if (MessageStore) {
-                try {
-                    const cache = MessageStore._channelMessages || MessageStore._messages;
-                    if (cache && typeof cache === 'object') {
-                        for (const chId in cache) {
-                            cleanMessageCollection(cache[chId]);
-                        }
-                    }
-                } catch (_) {}
-
                 if (typeof MessageStore.getMessages === 'function') {
-                    safePatch('instead', MessageStore, 'getMessages', function(args, orig) {
-                        const res = orig ? orig.apply(this, args) : null;
+                    safePatch('after', MessageStore, 'getMessages', function(args, res) {
                         if (!res) return res;
-                        cleanMessageCollection(res);
+                        if (typeof res.filter === 'function') {
+                            return res.filter(m => !isBlockedOrIgnored(m?.author?.id) && !blockedMessageIdsSet.has(String(m?.id)));
+                        }
                         if (Array.isArray(res)) {
-                            return res.filter(m => {
-                                if (!m || isBlockedOrIgnored(m.author?.id)) return false;
-                                sanitizeMessage(m);
-                                return true;
-                            });
+                            return res.filter(m => !isBlockedOrIgnored(m?.author?.id) && !blockedMessageIdsSet.has(String(m?.id)));
+                        }
+                        if (typeof res.toArray === 'function') {
+                            const origToArray = res.toArray.bind(res);
+                            res.toArray = function() {
+                                return origToArray().filter(m => !isBlockedOrIgnored(m?.author?.id) && !blockedMessageIdsSet.has(String(m?.id)));
+                            };
                         }
                         return res;
                     });
@@ -682,59 +583,74 @@
                 }
             }
 
-            // C. RowManager (Chat Rows & Zero Gaps & Loading Gate Protection)
+            // C. RowManager (Chat Rows & Zero Gaps & Reply Sanitization)
+            // NEVER return null from generate - returning null corrupts Discord's row list and crashes createRow with TypeError!
             if (RowManager && RowManager.prototype) {
-                safePatch('instead', RowManager.prototype, 'generate', function(args, orig) {
-                    if (!isRelationshipsReady) {
-                        return null; // Hold generation until blocked sets are verified
-                    }
+                safePatch('before', RowManager.prototype, 'generate', function(args) {
                     const data = args[0];
-                    if (data) {
-                        if (data.message) {
-                            if (isBlockedOrIgnored(data.message.author?.id) || blockedMessageIdsSet.has(String(data.message.id))) {
-                                return null; // Drop blocked message row entirely (zero gaps)
-                            }
-                            sanitizeMessage(data.message);
-                        }
+                    if (!data) return;
 
-                        if (data.rowType === 2 || data.type === 2) {
-                            return null; // Drop blocked message group row
+                    // 1. Sanitize or collapse blocked messages
+                    if (data.message) {
+                        if (isBlockedOrIgnored(data.message.author?.id) || blockedMessageIdsSet.has(String(data.message.id))) {
+                            data.renderContentOnly = true;
+                            data.message.content = '';
+                            data.message.reactions = [];
+                            data.message.canShowComponents = false;
                         }
+                        sanitizeMessage(data.message);
+                    }
 
-                        if (data.reply || data.referencedMessage || data.referenced_message) {
-                            const ref = data.referencedMessage || data.referenced_message || data.reply?.message;
-                            if (ref && (isBlockedOrIgnored(ref.author?.id) || blockedMessageIdsSet.has(String(ref.id)))) {
-                                delete data.reply;
-                                delete data.referencedMessage;
-                                delete data.referenced_message;
-                                if (data.message) data.message.type = 0;
+                    // 2. Neutralize blocked group row (type 2)
+                    if (data.rowType === 2 || data.type === 2) {
+                        data.renderContentOnly = true;
+                        data.roleStyle = '';
+                        data.text = '';
+                        data.revealed = false;
+                        data.content = [];
+                        data.count = 0;
+                    }
+
+                    // 3. Strip reply string referencing blocked users (normal message display)
+                    if (data.reply || data.referencedMessage || data.referenced_message) {
+                        const ref = data.referencedMessage || data.referenced_message || data.reply?.message;
+                        if (ref && (isBlockedOrIgnored(ref.author?.id) || blockedMessageIdsSet.has(String(ref.id)))) {
+                            delete data.reply;
+                            delete data.referencedMessage;
+                            delete data.referenced_message;
+                            if (data.message) {
+                                data.message.type = 0;
+                                delete data.message.referenced_message;
+                                delete data.message.referencedMessage;
                             }
                         }
                     }
+                });
 
-                    const res = orig ? orig.apply(this, args) : null;
-                    if (res) {
-                        if (res.rowType === 2 || res.type === 2 || (res.message && (isBlockedOrIgnored(res.message.author?.id) || blockedMessageIdsSet.has(String(res.message.id))))) {
-                            return null;
+                safePatch('after', RowManager.prototype, 'generate', function(args, res) {
+                    if (!res) return res;
+                    if (res.message) {
+                        sanitizeMessage(res.message);
+                    }
+                    if (res.reply) {
+                        const ref = res.reply.message || res.referencedMessage || res.referenced_message;
+                        if (ref && (isBlockedOrIgnored(ref.author?.id) || blockedMessageIdsSet.has(String(ref.id)))) {
+                            delete res.reply;
                         }
-                        if (res.message) {
-                            sanitizeMessage(res.message);
-                        }
-                        if (res.reply) {
-                            const ref = res.reply.message || res.referencedMessage || res.referenced_message;
-                            if (ref && (isBlockedOrIgnored(ref.author?.id) || blockedMessageIdsSet.has(String(ref.id)))) {
-                                delete res.reply;
-                            }
-                        }
+                    }
+                    if (res.rowType === 2 || res.type === 2) {
+                        res.renderContentOnly = true;
+                        res.roleStyle = '';
+                        res.text = '';
+                        res.revealed = false;
+                        res.content = [];
+                        res.count = 0;
                     }
                     return res;
                 });
 
                 if (typeof RowManager.prototype.getRows === 'function') {
                     safePatch('instead', RowManager.prototype, 'getRows', function(args, orig) {
-                        if (!isRelationshipsReady) {
-                            return []; // Hold returning rows during startup until blocked sets are verified
-                        }
                         const res = orig ? orig.apply(this, args) : [];
                         if (!Array.isArray(res)) return res;
                         return cleanChatRows(res);
@@ -742,7 +658,34 @@
                 }
             }
 
-            // D. TypingStore
+            // D. Defensive Guards for createRow & updateRows (Prevents null crashes)
+            try {
+                const RowCreator = _metro.findByProps('createRow');
+                if (RowCreator && typeof RowCreator.createRow === 'function') {
+                    safePatch('instead', RowCreator, 'createRow', function(args, orig) {
+                        const row = args[0];
+                        if (!row || typeof row !== 'object' || row.type == null) {
+                            return null;
+                        }
+                        return orig ? orig.apply(this, args) : null;
+                    });
+                }
+            } catch (_) {}
+
+            try {
+                const ChatModule = _metro.findByProps('updateRows');
+                if (ChatModule && typeof ChatModule.updateRows === 'function') {
+                    safePatch('before', ChatModule, 'updateRows', function(args) {
+                        for (let i = 0; i < args.length; i++) {
+                            if (Array.isArray(args[i])) {
+                                args[i] = args[i].filter(Boolean);
+                            }
+                        }
+                    });
+                }
+            } catch (_) {}
+
+            // E. TypingStore
             if (TypingStore && typeof TypingStore.getTypingUsers === 'function') {
                 safePatch('instead', TypingStore, 'getTypingUsers', function(args, orig) {
                     const res = orig ? orig.apply(this, args) : {};
@@ -755,7 +698,7 @@
                 });
             }
 
-            // E. RelationshipStore (Virtualize 0 Blocked / Ignored)
+            // F. RelationshipStore (Virtualize 0 Blocked / Ignored)
             if (RelationshipStore) {
                 if (typeof RelationshipStore.getBlockedUserIds === 'function') {
                     safePatch('instead', RelationshipStore, 'getBlockedUserIds', () => []);
@@ -767,19 +710,17 @@
                     safePatch('instead', RelationshipStore, 'getRelationships', function(args, orig) {
                         const res = orig ? orig.apply(this, args) : {};
                         if (!res || typeof res !== 'object') return res;
-                        const filtered = {};
-                        for (const [id, type] of Object.entries(res)) {
-                            if (type !== 2 && type !== 5 && !isBlockedOrIgnored(id)) {
-                                filtered[id] = type;
-                            }
+                        const cloned = { ...res };
+                        for (const uid in cloned) {
+                            if (cloned[uid] === 2 || cloned[uid] === 5) delete cloned[uid];
                         }
-                        return filtered;
+                        return cloned;
                     });
                 }
                 if (typeof RelationshipStore.getRelationshipType === 'function') {
                     safePatch('instead', RelationshipStore, 'getRelationshipType', function(args, orig) {
-                        const uid = args[0];
-                        if (isBlockedOrIgnored(uid)) return 0;
+                        const targetId = args[0];
+                        if (isBlockedOrIgnored(targetId)) return 0;
                         return orig ? orig.apply(this, args) : 0;
                     });
                 }
@@ -798,75 +739,78 @@
                 }
             }
 
-            // ========================================================
-            // 4. SUPPRESS "SHOW PROFILE?" DIALOGS & PROFILE CLICKS
-            // ========================================================
-            const profileActions = (_metro.findByProps && (_metro.findByProps('openUserProfile') || _metro.findByProps('showUserProfile')));
+            // G. Profile Actions (Prevent accidental unblocking)
+            const profileActions = _metro.findByProps('unblockUser', 'blockUser');
             if (profileActions) {
-                for (const k of ['openUserProfile', 'showUserProfile', 'openUserProfileModal']) {
+                ['unblockUser', 'unignoreUser'].forEach(k => {
                     if (typeof profileActions[k] === 'function') {
                         safePatch('instead', profileActions, k, function(args, orig) {
-                            const target = args[0];
-                            const uid = typeof target === 'string' ? target : (target?.userId || target?.user?.id);
-                            if (isBlockedOrIgnored(uid)) {
-                                console.log('[MasterSuite v2.0.0] Suppressed profile open for blocked user:', uid);
-                                return;
+                            const uId = args[0];
+                            if (uId) {
+                                blockedUserIdsSet.delete(String(uId));
+                                ignoredUserIdsSet.delete(String(uId));
+                                persistBlockedSets();
                             }
-                            return orig ? orig.apply(this, args) : undefined;
+                            return orig ? orig.apply(this, args) : null;
                         });
                     }
-                }
-            }
-
-            const RNAlert = _common.ReactNative?.Alert || (_metro.findByProps && (_metro.findByProps('alert')?.Alert || _metro.findByProps('Alert')?.Alert));
-            if (RNAlert && typeof RNAlert.alert === 'function') {
-                safePatch('instead', RNAlert, 'alert', function(args, orig) {
-                    const title = String(args[0] || '');
-                    const msg = String(args[1] || '');
-                    if (/Show Profile/i.test(title) || /You blocked/i.test(msg) || /blocked/i.test(title)) {
-                        console.log('[MasterSuite v2.0.0] Suppressed Show Profile dialog:', title);
-                        return;
-                    }
-                    return orig ? orig.apply(this, args) : undefined;
                 });
             }
 
-            // ========================================================
-            // 5. SETTINGS UI ELIMINATION (STRICT & SURGICAL - DO NOT TOUCH ICONS/AVATARS)
-            // ========================================================
-            const settingsTargetMods = new Set();
-            if (_vendetta.ui?.components?.Forms) settingsTargetMods.add(_vendetta.ui.components.Forms);
-
-            const formKeys = ['TableRow', 'TableRowGroup', 'TableSwitchRow', 'FormRow', 'FormSection'];
-            for (const p of formKeys) {
-                if (_metro.findByProps) {
-                    try {
-                        const m = _metro.findByProps(p);
-                        if (m && typeof m === 'object') settingsTargetMods.add(m);
-                    } catch (_) {}
-                }
+            // H. React Native Alert Suppressor (Prevent blocked user prompts)
+            const RNAlert = _metro.findByProps('alert') || (typeof globalThis !== 'undefined' && globalThis.alert);
+            if (RNAlert && typeof RNAlert.alert === 'function') {
+                safePatch('instead', RNAlert, 'alert', function(args, orig) {
+                    const title = String(args[0] || '');
+                    const message = String(args[1] || '');
+                    if (isSettingsBlockedSection(title) || isSettingsBlockedSection(message)) {
+                        return;
+                    }
+                    return orig ? orig.apply(this, args) : null;
+                });
             }
 
-            for (const mod of settingsTargetMods) {
-                for (const k of formKeys) {
-                    if (typeof mod[k] === 'function') {
-                        safePatch('instead', mod, k, function(args, orig) {
-                            const p = args[0] || {};
-                            if (isSettingsBlockedSection(p)) return null;
-                            const res = orig ? orig.apply(this, args) : null;
-                            if (res && res.props && isSettingsBlockedSection(res.props)) return null;
-                            return res;
-                        });
+            // I. User & Member Store Methods (UI-Level Elimination)
+            const UserStore = _metro.findByProps('getUser', 'getUsers');
+            if (UserStore && typeof UserStore.getUser === 'function') {
+                safePatch('after', UserStore, 'getUser', function(args, res) {
+                    if (res && isBlockedOrIgnored(res.id)) {
+                        res.isBlocked = false;
+                        res.isIgnored = false;
+                    }
+                    return res;
+                });
+            }
+
+            // J. Settings Modules (Zero Blocked User Rows in Settings Menus)
+            try {
+                const settingModules = [
+                    _metro.findByProps('getBlockedUsers'),
+                    _metro.findByProps('getIgnoredUsers'),
+                    _metro.findByProps('renderBlockedUsersRow')
+                ].filter(Boolean);
+
+                for (const mod of settingModules) {
+                    for (const k of ['getBlockedUsers', 'getIgnoredUsers']) {
+                        if (typeof mod[k] === 'function') {
+                            safePatch('instead', mod, k, function(args, orig) {
+                                return [];
+                            });
+                        }
                     }
                 }
-            }
+            } catch (_) {}
 
-            // ========================================================
-            // 6. FLATLIST & SECTIONLIST (WITH FROZEN PROPS & REF PROTECTION)
-            // ========================================================
-            const RN = _common.ReactNative || (_metro.findByProps && _metro.findByProps('FlatList', 'SectionList')) || (_metro.findByProps && _metro.findByProps('FlatList'));
-            const FlatList = RN?.FlatList || (_metro.findByProps && _metro.findByProps('FlatList')?.FlatList);
-            const SectionList = RN?.SectionList || (_metro.findByProps && _metro.findByProps('SectionList')?.SectionList);
+            // --- 3. React List Component Patches (FlatList & SectionList) ---
+            const ListComponents = _metro.findByProps('FlatList', 'SectionList') ||
+                                   _metro.findByProps('FlatList') ||
+                                   {};
+            const FlatList = ListComponents.FlatList ||
+                             (_metro.findByName && _metro.findByName('FlatList')) ||
+                             (typeof uiComponents !== 'undefined' && uiComponents.FlatList);
+            const SectionList = ListComponents.SectionList ||
+                                (_metro.findByName && _metro.findByName('SectionList')) ||
+                                (typeof uiComponents !== 'undefined' && uiComponents.SectionList);
 
             if (FlatList) {
                 if (typeof FlatList.render === 'function') {
@@ -877,16 +821,11 @@
                 }
                 if (FlatList.prototype && typeof FlatList.prototype.render === 'function') {
                     safePatch('instead', FlatList.prototype, 'render', function(args, orig) {
-                        const origProps = this.props;
-                        const safeProps = getSafeListProps(origProps);
-                        try {
-                            Object.defineProperty(this, 'props', { value: safeProps, configurable: true, writable: true });
-                        } catch (_) {}
-                        const res = orig ? orig.apply(this, args) : null;
-                        try {
-                            Object.defineProperty(this, 'props', { value: origProps, configurable: true, writable: true });
-                        } catch (_) {}
-                        return res;
+                        if (this.props) {
+                            const safeProps = getSafeListProps(this.props);
+                            this.props = safeProps;
+                        }
+                        return orig ? orig.apply(this, args) : null;
                     });
                 }
             }
@@ -900,45 +839,46 @@
                 }
                 if (SectionList.prototype && typeof SectionList.prototype.render === 'function') {
                     safePatch('instead', SectionList.prototype, 'render', function(args, orig) {
-                        const origProps = this.props;
-                        const safeProps = getSafeSectionProps(origProps);
-                        try {
-                            Object.defineProperty(this, 'props', { value: safeProps, configurable: true, writable: true });
-                        } catch (_) {}
-                        const res = orig ? orig.apply(this, args) : null;
-                        try {
-                            Object.defineProperty(this, 'props', { value: origProps, configurable: true, writable: true });
-                        } catch (_) {}
-                        return res;
+                        if (this.props) {
+                            const safeProps = getSafeSectionProps(this.props);
+                            this.props = safeProps;
+                        }
+                        return orig ? orig.apply(this, args) : null;
                     });
                 }
             }
 
             notifyActive();
-            console.log('[MasterSuite Mobile v2.0.0] Antigravity Master Suite loaded and active!');
-        } catch (err) {
-            console.error('[MasterSuite Mobile v2.0.0] Error during startup:', err);
+            console.log('[MasterSuite Mobile v2.1.0] Antigravity Master Suite loaded and active!');
+        } catch (e) {
+            console.error('[MasterSuite Mobile v2.1.0 Error]', e);
         }
     }
 
     function stopPlugin() {
-        for (const t of Object.values(recoveryDebounce)) clearTimeout(t);
-        for (const unpatch of unpatches) {
-            try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
+        try {
+            console.log('[MasterSuite Mobile v2.1.0] Stopping Antigravity Master Suite...');
+            while (unpatches.length > 0) {
+                const unpatch = unpatches.pop();
+                try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
+            }
+            console.log('[MasterSuite Mobile v2.1.0] Antigravity Master Suite stopped successfully.');
+        } catch (e) {
+            console.error('[MasterSuite Mobile v2.1.0 Error stopping]', e);
         }
-        unpatches.length = 0;
-        console.log('[MasterSuite Mobile v2.0.0] Unloaded cleanly.');
     }
 
-    // Dual lifecycle exports
-    const pluginDef = {
+    exports.default = {
+        name: 'Antigravity Master Suite',
+        description: 'All-in-One: 100% Blocked user elimination, LRU Hermes memory optimization, FlatList virtualization, and zero \'Messages failed to load\' auto-recovery.',
+        authors: [{ name: 'Antigravity', id: '698947564459917343' }],
+        version: '2.1.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
         onUnload: stopPlugin
     };
 
-    exports.default = pluginDef;
     exports.start = startPlugin;
     exports.stop = stopPlugin;
     exports.onLoad = startPlugin;
