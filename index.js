@@ -57,7 +57,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v1.9.0: ACTIVE'
+                    content: 'Antigravity Master Suite v2.0.0: ACTIVE'
                 });
                 return;
             }
@@ -65,7 +65,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v1.9.0: ACTIVE');
+                showToast('Antigravity Master Suite v2.0.0: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -175,8 +175,9 @@
         if (typeof item === 'string') return isBlockedOrIgnored(item);
         if (typeof item !== 'object') return false;
 
-        // Never match headers, dividers, guilds, or channels
+        // Never match headers, dividers, guilds, channels, or folders
         if (item.type === 'HEADER' || item.type === 1 || item.header) return false;
+        if (item.guild || item.channel) return false;
         if (item.features || item.mfaLevel !== undefined || item.vanityURLCode !== undefined) return false;
         if (item.bitrate !== undefined || item.topic !== undefined || item.rateLimitPerUser !== undefined) return false;
         if (item.type === 'GUILD' || item.type === 'CHANNEL' || item.type === 'FOLDER') return false;
@@ -188,7 +189,7 @@
                    item.memberId ||
                    item.author?.id ||
                    (item.user && typeof item.user === 'string' ? item.user : null) ||
-                   (item.id && !item.channels && !item.features && !item.guild && !item.title ? item.id : null);
+                   (item.id && !item.channels && !item.features && !item.guild && !item.title && item.type !== 'GUILD' ? item.id : null);
 
         return uid ? isBlockedOrIgnored(uid) : false;
     }
@@ -423,7 +424,7 @@
 
     function startPlugin() {
         try {
-            console.log('[MasterSuite Mobile v1.9.0] Starting Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v2.0.0] Starting Antigravity Master Suite...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -496,17 +497,17 @@
                 } catch (_) {}
             }
 
-            console.log('[MasterSuite v1.9.0] Tracking', blockedUserIdsSet.size, 'blocked and', ignoredUserIdsSet.size, 'ignored users.');
+            console.log('[MasterSuite v2.0.0] Tracking', blockedUserIdsSet.size, 'blocked and', ignoredUserIdsSet.size, 'ignored users.');
 
             // ========================================================
-            // 2. GATEWAY INTERCEPTION (BULLETPROOF ERROR-SAFE DISPATCHER)
+            // 2. UNIFIED ERROR-SAFE GATEWAY DISPATCHER HOOK (NEVER MUTATE GUILD CREATION)
             // ========================================================
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
                 safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
                     try {
                         const event = args[0];
                         if (event && typeof event === 'object') {
-                            // Sync relationship events
+                            // 1. Sync relationship events
                             if (event.type === 'RELATIONSHIP_ADD' && event.relationship) {
                                 const rid = String(event.relationship.id);
                                 if (event.relationship.type === 2) blockedUserIdsSet.add(rid);
@@ -523,7 +524,7 @@
                                 }
                             }
 
-                            // Full initial sync from CONNECTION_OPEN (READ ONLY - DO NOT MUTATE GUILDS ARRAY)
+                            // 2. Initial sync from CONNECTION_OPEN (READ ONLY - NEVER MUTATE GUILDS)
                             if (event.type === 'CONNECTION_OPEN') {
                                 if (Array.isArray(event.relationships)) {
                                     for (const r of event.relationships) {
@@ -536,38 +537,7 @@
                                 markRelationshipsReady();
                             }
 
-                            // Filter members chunk in small servers like "ihh"
-                            if (event.type === 'GUILD_MEMBERS_CHUNK') {
-                                if (Array.isArray(event.members)) {
-                                    event.members = event.members.filter(m => !isMemberBlockedOrIgnored(m));
-                                }
-                                if (Array.isArray(event.presences)) {
-                                    event.presences = event.presences.filter(p => !isBlockedOrIgnored(p?.user?.id || p?.userId));
-                                }
-                            }
-
-                            // Filter initial guild members in GUILD_CREATE
-                            if (event.type === 'GUILD_CREATE') {
-                                if (Array.isArray(event.members)) {
-                                    const origLen = event.members.length;
-                                    event.members = event.members.filter(m => !isMemberBlockedOrIgnored(m));
-                                    const diff = origLen - event.members.length;
-                                    if (typeof event.member_count === 'number') event.member_count = Math.max(0, event.member_count - diff);
-                                }
-                                if (Array.isArray(event.presences)) {
-                                    event.presences = event.presences.filter(p => !isBlockedOrIgnored(p?.user?.id || p?.userId));
-                                }
-                            }
-
-                            // Swallow live blocked member additions
-                            if ((event.type === 'GUILD_MEMBER_ADD' || event.type === 'GUILD_MEMBER_UPDATE') && isMemberBlockedOrIgnored(event.user || event.member || event.userId)) {
-                                return;
-                            }
-                            if (event.type === 'PRESENCE_UPDATE' && isMemberBlockedOrIgnored(event.user?.id || event.userId)) {
-                                return;
-                            }
-
-                            // Filter incoming chat messages in channels
+                            // 3. Filter incoming chat messages in channels
                             if (event.type === 'LOAD_MESSAGES_SUCCESS' && Array.isArray(event.messages)) {
                                 event.messages = event.messages.filter(msg => {
                                     if (!msg) return false;
@@ -582,7 +552,7 @@
                                 }
                             }
 
-                            // Live incoming message
+                            // 4. Live incoming message
                             if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && event.message) {
                                 if (isBlockedOrIgnored(event.message.author?.id)) {
                                     if (event.message.id) blockedMessageIdsSet.add(String(event.message.id));
@@ -591,16 +561,37 @@
                                 sanitizeMessage(event.message);
                             }
 
-                            // Live typing indicator
+                            // 5. Live typing indicator
                             if (event.type === 'TYPING_START' && isBlockedOrIgnored(event.userId)) {
                                 return;
+                            }
+
+                            // 6. Channel switch tracking for LRU cache
+                            if (event.type === 'CHANNEL_SELECT' && event.channelId) {
+                                recentChannels = recentChannels.filter(id => id !== event.channelId);
+                                recentChannels.unshift(event.channelId);
+                                if (recentChannels.length > MAX_CHANNELS) {
+                                    recentChannels = recentChannels.slice(0, MAX_CHANNELS);
+                                }
+                            }
+
+                            // 7. Silent auto-recovery on message load failure
+                            if (event.type === 'LOAD_MESSAGES_FAILURE' || event.type === 'MESSAGE_FETCH_FAILED') {
+                                const chId = event.channelId;
+                                if (chId && !recoveryDebounce[chId]) {
+                                    recoveryDebounce[chId] = setTimeout(() => {
+                                        delete recoveryDebounce[chId];
+                                        const MessageActions = _metro.findByProps ? _metro.findByProps('fetchMessages') : null;
+                                        try { MessageActions?.fetchMessages({ channelId: chId, limit: 50 }); } catch (_) {}
+                                    }, 1200);
+                                }
                             }
                         }
                     } catch (err) {
                         console.error('[MasterSuite Dispatch Hook Error]', err);
                     }
 
-                    // ALWAYS call orig so GuildStore and Discord internal state machines never break!
+                    // ALWAYS call orig so GuildStore, ChannelStore, Gateway, and Discord internal state machines NEVER break!
                     return orig ? orig.apply(this, args) : undefined;
                 });
             }
@@ -818,7 +809,7 @@
                             const target = args[0];
                             const uid = typeof target === 'string' ? target : (target?.userId || target?.user?.id);
                             if (isBlockedOrIgnored(uid)) {
-                                console.log('[MasterSuite v1.9.0] Suppressed profile open for blocked user:', uid);
+                                console.log('[MasterSuite v2.0.0] Suppressed profile open for blocked user:', uid);
                                 return;
                             }
                             return orig ? orig.apply(this, args) : undefined;
@@ -833,7 +824,7 @@
                     const title = String(args[0] || '');
                     const msg = String(args[1] || '');
                     if (/Show Profile/i.test(title) || /You blocked/i.test(msg) || /blocked/i.test(title)) {
-                        console.log('[MasterSuite v1.9.0] Suppressed Show Profile dialog:', title);
+                        console.log('[MasterSuite v2.0.0] Suppressed Show Profile dialog:', title);
                         return;
                     }
                     return orig ? orig.apply(this, args) : undefined;
@@ -923,49 +914,10 @@
                 }
             }
 
-            // ========================================================
-            // 7. SAFE MESSAGE RELIABILITY & LRU BOUNDS
-            // ========================================================
-            if (_FluxDispatcher) {
-                safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
-                    try {
-                        const event = args[0];
-                        if (event && event.type === 'CHANNEL_SELECT' && event.channelId) {
-                            recentChannels = recentChannels.filter(id => id !== event.channelId);
-                            recentChannels.unshift(event.channelId);
-                            if (recentChannels.length > MAX_CHANNELS) {
-                                recentChannels = recentChannels.slice(0, MAX_CHANNELS);
-                            }
-                        }
-                    } catch (_) {}
-                    return orig ? orig.apply(this, args) : undefined;
-                });
-            }
-
-            const MessageActions = _metro.findByProps ? _metro.findByProps('fetchMessages') : null;
-            if (_FluxDispatcher && MessageActions) {
-                safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
-                    try {
-                        const event = args[0];
-                        if (event && (event.type === 'LOAD_MESSAGES_FAILURE' || event.type === 'MESSAGE_FETCH_FAILED')) {
-                            const chId = event.channelId;
-                            if (chId && !recoveryDebounce[chId]) {
-                                recoveryDebounce[chId] = setTimeout(() => {
-                                    delete recoveryDebounce[chId];
-                                    console.log('[MessageReliability v1.9.0] Auto-recovering channel:', chId);
-                                    try { MessageActions.fetchMessages({ channelId: chId, limit: 50 }); } catch (_) {}
-                                }, 1200);
-                            }
-                        }
-                    } catch (_) {}
-                    return orig ? orig.apply(this, args) : undefined;
-                });
-            }
-
             notifyActive();
-            console.log('[MasterSuite Mobile v1.9.0] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v2.0.0] Antigravity Master Suite loaded and active!');
         } catch (err) {
-            console.error('[MasterSuite Mobile v1.9.0] Error during startup:', err);
+            console.error('[MasterSuite Mobile v2.0.0] Error during startup:', err);
         }
     }
 
@@ -975,7 +927,7 @@
             try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
         }
         unpatches.length = 0;
-        console.log('[MasterSuite Mobile v1.9.0] Unloaded cleanly.');
+        console.log('[MasterSuite Mobile v2.0.0] Unloaded cleanly.');
     }
 
     // Dual lifecycle exports
