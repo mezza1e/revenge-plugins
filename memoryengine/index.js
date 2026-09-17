@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
     const revengeApi = window.revenge || window.bunny || window.vendetta || {};
     const { metro, patcher } = revengeApi;
     const unpatches = [];

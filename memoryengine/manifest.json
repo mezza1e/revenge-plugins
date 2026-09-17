@@ -1,18 +1,13 @@
-﻿{
-  "format": 1,
-  "id": "com.antigravity.memoryengine",
+{
   "name": "DiscordMemoryEngine",
   "description": "1:1 mobile port: Bounded Flux LRU channel caching, Hermes heap optimization, and FlatList virtualization.",
-  "author": "Antigravity",
   "authors": [
     {
       "name": "Antigravity",
-      "id": "0"
+      "id": "698947564459917343"
     }
   ],
   "main": "index.js",
   "version": "1.0.0",
-  "dist": {
-    "script": "index.js"
-  }
+  "hash": "c0c6b00ce62b1e864a91039d9fd05c135cf882c5cd544095ad49dcb57f05a845"
 }
