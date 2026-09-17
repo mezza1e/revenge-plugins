@@ -64,7 +64,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v2.6.0: ACTIVE'
+                    content: 'Antigravity Master Suite v2.7.0: ACTIVE'
                 });
                 return;
             }
@@ -72,18 +72,15 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v2.6.0: ACTIVE');
+                showToast('Antigravity Master Suite v2.7.0: ACTIVE');
                 return;
             }
         } catch (_) {}
     }
 
-    // --- State & Blocked Sets (STRICT ID-ONLY BLOCKING) ---
-    // Seeded with the blocked user's exact snowflake ID (923704687235055697) to eliminate cold-boot flash (t=0ms).
-    // Absolutely NO name-based blocking: other users named "m.j" or "mj" will NEVER be blocked.
-    const SEEDED_BLOCKED_IDS = ['923704687235055697'];
-
-    const blockedUserIdsSet = new Set(SEEDED_BLOCKED_IDS);
+    // --- State & Blocked Sets (PURELY DYNAMIC TRACKING - ZERO HARDCODED IDS OR NAMES) ---
+    // All blocked users are discovered and tracked organically through Discord's relationship system and local storage.
+    const blockedUserIdsSet = new Set();
     const ignoredUserIdsSet = new Set();
     const blockedMessageIdsSet = new Set();
     let recentChannels = [];
@@ -98,7 +95,14 @@
     let TypingStore = null;
     let RowManager = null;
 
-    // IMMEDIATE ZERO-LATENCY CACHE RESTORATION (Triple-redundant synchronous store):
+    // References to raw unpatched store functions for accurate internal lookups
+    let rawIsBlocked = null;
+    let rawIsIgnored = null;
+    let rawGetRelationships = null;
+    let rawGetBlockedUserIds = null;
+
+    // IMMEDIATE ZERO-LATENCY CACHE RESTORATION:
+    // Restores previously blocked users saved from Discord relationships on past sessions
     try {
         if (_storage && Array.isArray(_storage.blockedUserIds)) {
             for (const id of _storage.blockedUserIds) blockedUserIdsSet.add(String(id));
@@ -163,14 +167,34 @@
         } catch (_) {}
     }
 
-    // Strict Snowflake ID check - only returns true if the user's ID is actually blocked or ignored
+    // Dynamic relationship check: checks in-memory set, with seamless fallback to raw store if available
     function isBlockedOrIgnored(userId) {
         if (!userId) return false;
         const s = String(userId);
-        return blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s);
+        if (blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s)) return true;
+
+        if (rawIsBlocked && RelationshipStore) {
+            try {
+                if (rawIsBlocked.call(RelationshipStore, s) === true) {
+                    blockedUserIdsSet.add(s);
+                    persistBlockedSets();
+                    return true;
+                }
+            } catch (_) {}
+        }
+        if (rawIsIgnored && RelationshipStore) {
+            try {
+                if (rawIsIgnored.call(RelationshipStore, s) === true) {
+                    ignoredUserIdsSet.add(s);
+                    persistBlockedSets();
+                    return true;
+                }
+            } catch (_) {}
+        }
+        return false;
     }
 
-    // Member discriminator: strictly checks the member's unique Snowflake User ID
+    // Member discriminator: dynamically checks member's Snowflake User ID against relationship tracker
     function isMemberBlockedOrIgnored(item) {
         if (!item || typeof item !== 'object') return false;
 
@@ -234,7 +258,7 @@
         return null;
     }
 
-    // Strip reply quote and reference if original message was from an actually blocked user
+    // Strip reply quote and reference if original message was from a blocked user
     function sanitizeMessage(msg) {
         if (!msg || typeof msg !== 'object') return;
         try {
@@ -493,7 +517,7 @@
         }
     }
 
-    // Strict check if element props indicate an actually blocked user by ID
+    // Strict check if element props indicate a blocked user by ID
     function shouldAbsorbElement(props) {
         if (!props || typeof props !== 'object') return false;
         if (!props.userId && !props.user && !props.member && !props.author && !props.item && !props.message && !props.record) {
@@ -518,9 +542,46 @@
         return false;
     }
 
+    function syncFromRelationshipStore() {
+        if (!RelationshipStore) return;
+        try {
+            let updated = false;
+            const rels = rawGetRelationships ? rawGetRelationships.call(RelationshipStore) : (typeof RelationshipStore.getRelationships === 'function' ? RelationshipStore.getRelationships() : null);
+            if (rels && typeof rels === 'object') {
+                for (const uid in rels) {
+                    const sUid = String(uid);
+                    if (rels[uid] === 2 && !blockedUserIdsSet.has(sUid)) {
+                        blockedUserIdsSet.add(sUid);
+                        updated = true;
+                    }
+                    if (rels[uid] === 5 && !ignoredUserIdsSet.has(sUid)) {
+                        ignoredUserIdsSet.add(sUid);
+                        updated = true;
+                    }
+                }
+            }
+            if (rawGetBlockedUserIds) {
+                const bIds = rawGetBlockedUserIds.call(RelationshipStore);
+                if (Array.isArray(bIds)) {
+                    for (const id of bIds) {
+                        const sId = String(id);
+                        if (!blockedUserIdsSet.has(sId)) {
+                            blockedUserIdsSet.add(sId);
+                            updated = true;
+                        }
+                    }
+                }
+            }
+            if (updated) {
+                persistBlockedSets();
+                markRelationshipsReady();
+            }
+        } catch (_) {}
+    }
+
     function startPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.6.0] Starting Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v2.7.0] Starting Antigravity Master Suite...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -568,25 +629,13 @@
                 }
             }
 
-            // Hydrate sets from RelationshipStore if already loaded
+            // Capture raw unpatched RelationshipStore references before patching
             if (RelationshipStore) {
-                try {
-                    const rels = RelationshipStore.getRelationships();
-                    if (rels && typeof rels === 'object') {
-                        for (const uid in rels) {
-                            if (rels[uid] === 2) blockedUserIdsSet.add(String(uid));
-                            if (rels[uid] === 5) ignoredUserIdsSet.add(String(uid));
-                        }
-                        persistBlockedSets();
-                    }
-                    if (typeof RelationshipStore.getBlockedUserIds === 'function') {
-                        const bIds = RelationshipStore.getBlockedUserIds();
-                        if (Array.isArray(bIds)) {
-                            for (const id of bIds) blockedUserIdsSet.add(String(id));
-                            persistBlockedSets();
-                        }
-                    }
-                } catch (_) {}
+                rawIsBlocked = RelationshipStore.isBlocked;
+                rawIsIgnored = RelationshipStore.isIgnored;
+                rawGetRelationships = RelationshipStore.getRelationships;
+                rawGetBlockedUserIds = RelationshipStore.getBlockedUserIds;
+                syncFromRelationshipStore();
             }
 
             // IMMEDIATE COLD-BOOT PURGE: sanitize any cached messages loaded before WebSocket connection
@@ -601,7 +650,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v2.6.0] Zero-Latency Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users (strict ID-only).`);
+            console.log(`[MasterSuite v2.7.0] Dynamic Tracking Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
             // --- 1. FluxDispatcher (Safe Gateway Passthrough - NEVER mutate indexed GUILD_MEMBER_LIST_UPDATE) ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -609,7 +658,7 @@
                     const event = args[0];
                     if (event && typeof event === 'object') {
                         try {
-                            // 1. Sync relationship events
+                            // 1. Sync relationship events dynamically in real time
                             if (event.type === 'RELATIONSHIP_ADD' && event.relationship) {
                                 const rid = String(event.relationship.id);
                                 if (event.relationship.type === 2) blockedUserIdsSet.add(rid);
@@ -1081,7 +1130,6 @@
             } catch (_) {}
 
             // --- 5. Universal React.createElement & JSX Runtime Interceptor ---
-            // Catch any component rendering an actually blocked user row, card, or message by ID and absorb into zero-height View
             try {
                 if (React && typeof React.createElement === 'function') {
                     const origCreateElement = React.createElement;
@@ -1119,30 +1167,30 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v2.6.0] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v2.7.0] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v2.6.0 Error]', e);
+            console.error('[MasterSuite Mobile v2.7.0 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.6.0] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v2.7.0] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v2.6.0] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v2.7.0] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v2.6.0 Error stopping]', e);
+            console.error('[MasterSuite Mobile v2.7.0 Error stopping]', e);
         }
     }
 
     exports.default = {
         name: 'Antigravity Master Suite',
-        description: 'All-in-One: Strict snowflake ID blocking (only actually blocked users), 0ms launch elimination, pristine playerlist sync (0 duplicates, 0 missing), and LRU memory optimization.',
+        description: 'All-in-One: Purely dynamic Discord relationship tracking, 0ms launch elimination, pristine playerlist sync (0 duplicates, 0 missing), and LRU memory optimization.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '2.6.0',
+        version: '2.7.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,

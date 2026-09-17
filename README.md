@@ -7,7 +7,7 @@ High-performance, memory-optimized, and error-resilient plugins for Discord Mobi
 In the Revengecord mobile app, open **Settings > Plugins > Install Plugin** and paste this exact URL:
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.6.0/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.7.0/
 ```
 
 *(Alternative GitHub Pages URL: `https://mezza1e.github.io/revenge-plugins/`)*
@@ -28,10 +28,10 @@ https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.6.0/
 If you prefer installing features separately:
 
 * **ByeBlocked Only:**
-  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.6.0/byeblocked/`
+  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.7.0/byeblocked/`
 
 * **MemoryEngine Only:**
-  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.6.0/memoryengine/`
+  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.7.0/memoryengine/`
 
 * **MessageReliability Only:**
-  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.6.0/messagereliability/`
+  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@2.7.0/messagereliability/`

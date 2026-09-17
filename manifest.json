@@ -1,6 +1,6 @@
 {
   "name": "Antigravity Master Suite",
-  "description": "All-in-One: Strict snowflake ID blocking (only actually blocked users), 0ms launch elimination, pristine playerlist sync (0 duplicates, 0 missing), and LRU memory optimization.",
+  "description": "All-in-One: Purely dynamic Discord relationship tracking, 0ms launch elimination, pristine playerlist sync (0 duplicates, 0 missing), and LRU memory optimization.",
   "authors": [
     {
       "name": "Antigravity",
@@ -8,6 +8,6 @@
     }
   ],
   "main": "index.js",
-  "version": "2.6.0",
-  "hash": "3a0184668a0274a4941ae470b0181ed1555cb31b1f64b7db38e27ba58f08dbc5"
+  "version": "2.7.0",
+  "hash": "294dccba452c6591be6ebea9b37c3cceb75d4d7c4615e0513372806b034e88bf"
 }
