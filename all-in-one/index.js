@@ -24,7 +24,7 @@
                     {};
     const unpatches = [];
 
-    // React and View resolution for valid empty cell rendering
+    // React and View resolution
     let React = (typeof globalThis !== 'undefined' && globalThis.React) ||
                 _common.React ||
                 (_metro.findByProps && (_metro.findByProps('createElement', 'Component') || _metro.findByProps('createElement')));
@@ -64,7 +64,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v2.8.0: ACTIVE'
+                    content: 'Antigravity Master Suite v2.9.0: ACTIVE'
                 });
                 return;
             }
@@ -72,7 +72,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v2.8.0: ACTIVE');
+                showToast('Antigravity Master Suite v2.9.0: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -88,11 +88,13 @@
 
     let RelationshipStore = null;
     let GuildMemberStore = null;
+    let ChannelMemberStore = null;
     let MemberListStore = null;
     let MessageStore = null;
     let UserStore = null;
     let UserProfileStore = null;
     let TypingStore = null;
+    let PresenceStore = null;
     let RowManager = null;
 
     // References to raw unpatched store functions for accurate internal lookups
@@ -100,6 +102,7 @@
     let rawIsIgnored = null;
     let rawGetRelationships = null;
     let rawGetBlockedUserIds = null;
+    let rawGetPresenceStatus = null;
 
     // IMMEDIATE ZERO-LATENCY CACHE RESTORATION:
     try {
@@ -113,16 +116,12 @@
             const b = localStorage.getItem('antigravity_blocked_ids');
             if (b) {
                 const parsed = JSON.parse(b);
-                if (Array.isArray(parsed)) {
-                    for (const id of parsed) blockedUserIdsSet.add(String(id));
-                }
+                if (Array.isArray(parsed)) for (const id of parsed) blockedUserIdsSet.add(String(id));
             }
             const ig = localStorage.getItem('antigravity_ignored_ids');
             if (ig) {
                 const parsed = JSON.parse(ig);
-                if (Array.isArray(parsed)) {
-                    for (const id of parsed) ignoredUserIdsSet.add(String(id));
-                }
+                if (Array.isArray(parsed)) for (const id of parsed) ignoredUserIdsSet.add(String(id));
             }
         }
         if (typeof globalThis !== 'undefined') {
@@ -161,6 +160,7 @@
         try {
             if (MessageStore && typeof MessageStore.emitChange === 'function') MessageStore.emitChange();
             if (GuildMemberStore && typeof GuildMemberStore.emitChange === 'function') GuildMemberStore.emitChange();
+            if (ChannelMemberStore && typeof ChannelMemberStore.emitChange === 'function') ChannelMemberStore.emitChange();
             if (MemberListStore && typeof MemberListStore.emitChange === 'function') MemberListStore.emitChange();
             if (RelationshipStore && typeof RelationshipStore.emitChange === 'function') RelationshipStore.emitChange();
             if (UserStore && typeof UserStore.emitChange === 'function') UserStore.emitChange();
@@ -219,6 +219,11 @@
             return isBlockedOrIgnored(uid);
         }
 
+        if (typeof item.key === 'string') {
+            const match = item.key.match(/\d{17,20}/);
+            if (match && isBlockedOrIgnored(match[0])) return true;
+        }
+
         return false;
     }
 
@@ -243,6 +248,35 @@
             }
         });
         return clonedHeader;
+    }
+
+    // Dynamic presence-based calculation: computes exact number of blocked users currently in Online or Offline status
+    function getBlockedCountForSection(sectionTitleOrId) {
+        if (!sectionTitleOrId || blockedUserIdsSet.size === 0) return 0;
+        const lower = String(sectionTitleOrId).toLowerCase();
+        const isOnline = lower.includes('online');
+        const isOffline = lower.includes('offline');
+        if (!isOnline && !isOffline) return 0;
+
+        let count = 0;
+        for (const uid of blockedUserIdsSet) {
+            let status = 'offline';
+            if (rawGetPresenceStatus && PresenceStore) {
+                try { status = rawGetPresenceStatus.call(PresenceStore, uid) || 'offline'; } catch (_) {}
+            } else if (PresenceStore && typeof PresenceStore.getStatus === 'function') {
+                try { status = PresenceStore.getStatus(uid) || 'offline'; } catch (_) {}
+            }
+            if (isOnline && (status === 'online' || status === 'idle' || status === 'dnd')) {
+                count++;
+            } else if (isOffline && (status === 'offline' || !status)) {
+                count++;
+            }
+        }
+        // Fallback: if presence is unknown but blocked users exist, assume online if section is online
+        if (count === 0 && isOnline && blockedUserIdsSet.size > 0) {
+            count = blockedUserIdsSet.size;
+        }
+        return count;
     }
 
     // Safely render an empty, zero-height element
@@ -416,6 +450,71 @@
         }
 
         return pruneOrphanedDateDividers(temp);
+    }
+
+    // Complete sanitizer for ChannelMemberStore.getProps response
+    function sanitizeChannelMemberProps(res) {
+        if (!res || typeof res !== 'object') return res;
+        if (!Array.isArray(res.rows) && !Array.isArray(res.groups) && !Array.isArray(res.members)) return res;
+
+        const newRes = { ...res };
+
+        // 1. Sanitize flat rows (filters out blocked user, updates group row headers)
+        if (Array.isArray(newRes.rows)) {
+            const cleanRows = [];
+            let currentGroupIdx = -1;
+            let currentGroupBlockedCount = 0;
+
+            for (let i = 0; i < newRes.rows.length; i++) {
+                const r = newRes.rows[i];
+                if (!r || typeof r !== 'object') {
+                    cleanRows.push(r);
+                    continue;
+                }
+
+                const isGroup = r.type === 'GROUP' || r.type === 'HEADER' || r.type === 'SECTION' ||
+                                r.rowType === 'GROUP' || r.rowType === 'HEADER' ||
+                                (r.header === true) ||
+                                (typeof r.id === 'string' && (r.id === 'online' || r.id === 'offline' || r.id.startsWith('group')));
+
+                if (isGroup) {
+                    if (currentGroupIdx !== -1 && currentGroupBlockedCount > 0) {
+                        cleanRows[currentGroupIdx] = updateHeaderCount(cleanRows[currentGroupIdx], currentGroupBlockedCount);
+                    }
+                    currentGroupIdx = cleanRows.length;
+                    currentGroupBlockedCount = 0;
+                    cleanRows.push(r);
+                    continue;
+                }
+
+                if (isMemberBlockedOrIgnored(r)) {
+                    currentGroupBlockedCount++;
+                    continue; // Completely eliminate from rows!
+                }
+
+                cleanRows.push(r);
+            }
+
+            if (currentGroupIdx !== -1 && currentGroupBlockedCount > 0) {
+                cleanRows[currentGroupIdx] = updateHeaderCount(cleanRows[currentGroupIdx], currentGroupBlockedCount);
+            }
+
+            newRes.rows = cleanRows;
+        }
+
+        // 2. Sanitize groups array (e.g. [{ id: 'online', count: 2, title: 'Online — 2' }, ...])
+        if (Array.isArray(newRes.groups)) {
+            newRes.groups = newRes.groups.map(grp => {
+                if (!grp || typeof grp !== 'object') return grp;
+                const blockedCount = getBlockedCountForSection(grp.id || grp.title);
+                if (blockedCount > 0) {
+                    return updateHeaderCount(grp, blockedCount);
+                }
+                return grp;
+            });
+        }
+
+        return newRes;
     }
 
     // Helper to safely clone and filter SectionList props with accurate header counts
@@ -601,6 +700,46 @@
         return false;
     }
 
+    // Recursive child checker: identifies whether a child element or its wrapper represents a blocked user
+    function isBlockedElementOrWrapper(child) {
+        if (!child || typeof child !== 'object') return false;
+        const cp = child.props;
+        if (cp && typeof cp === 'object') {
+            // 1. Direct props check
+            if (shouldAbsorbElement(cp)) return true;
+
+            // 2. Child's children check (handles <View style={styles.cardItemWrapper}><MemberRow ... /></View>)
+            if (cp.children) {
+                if (Array.isArray(cp.children)) {
+                    for (const sub of cp.children) {
+                        if (isBlockedElementOrWrapper(sub)) return true;
+                    }
+                } else if (isBlockedElementOrWrapper(cp.children)) {
+                    return true;
+                }
+            }
+        }
+
+        // 3. Key check (React elements often carry user ID on key, with prefixes like member-123 or .$123)
+        if (child.key) {
+            if (isBlockedOrIgnored(child.key)) return true;
+            if (typeof child.key === 'string') {
+                const match = child.key.match(/\d{17,20}/);
+                if (match && isBlockedOrIgnored(match[0])) return true;
+            }
+        }
+
+        return false;
+    }
+
+    function isDividerElement(child) {
+        if (!child || typeof child !== 'object') return false;
+        const name = child.type?.name || child.type?.displayName || '';
+        if (typeof name === 'string' && (name.includes('Divider') || name.includes('Separator'))) return true;
+        if (child.props && child.props.isDivider === true) return true;
+        return false;
+    }
+
     function syncFromRelationshipStore() {
         if (!RelationshipStore) return;
         try {
@@ -640,7 +779,7 @@
 
     function startPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.8.0] Starting Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v2.9.0] Starting Antigravity Master Suite...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -671,6 +810,8 @@
                                     _metro.findByProps('isBlocked') ||
                                     _metro.findByProps('getRelationships');
                 GuildMemberStore = _metro.findByProps('getMember', 'getMembers');
+                ChannelMemberStore = _metro.findByProps('getProps', 'getRows') ||
+                                     (_metro.findByStoreName && (_metro.findByStoreName('ChannelMemberStore') || _metro.findByStoreName('ChannelMembersStore')));
                 MemberListStore = _metro.findByProps('getMemberListSections') ||
                                   _metro.findByProps('getRows', 'getGroups') ||
                                   _metro.findByProps('getGroups', 'getItem') ||
@@ -679,6 +820,7 @@
                 UserStore = _metro.findByProps('getUser', 'getUsers');
                 UserProfileStore = _metro.findByProps('getUserProfile');
                 TypingStore = _metro.findByProps('getTypingUsers');
+                PresenceStore = _metro.findByProps('getState', 'getStatus') || _metro.findByProps('getStatus');
                 RowManager = _metro.findByProps('RowManager')?.RowManager ||
                              (_metro.findByName && _metro.findByName('RowManager'));
                 if (!React) {
@@ -692,13 +834,16 @@
                 }
             }
 
-            // Capture raw unpatched RelationshipStore references before patching
+            // Capture raw unpatched references before patching
             if (RelationshipStore) {
                 rawIsBlocked = RelationshipStore.isBlocked;
                 rawIsIgnored = RelationshipStore.isIgnored;
                 rawGetRelationships = RelationshipStore.getRelationships;
                 rawGetBlockedUserIds = RelationshipStore.getBlockedUserIds;
                 syncFromRelationshipStore();
+            }
+            if (PresenceStore) {
+                rawGetPresenceStatus = PresenceStore.getStatus;
             }
 
             // IMMEDIATE COLD-BOOT PURGE: sanitize any cached messages loaded before WebSocket connection
@@ -713,9 +858,9 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v2.8.0] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v2.9.0] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
-            // --- 1. FluxDispatcher ---
+            // --- 1. FluxDispatcher Gateway & Dispatch Patches ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
                 safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
                     const event = args[0];
@@ -814,7 +959,7 @@
                                 }
                             }
 
-                            // 8. Safe Gateway Member Filtering (GUILD_MEMBERS_CHUNK)
+                            // 8. Gateway Member Filtering (GUILD_MEMBERS_CHUNK)
                             if (event.type === 'GUILD_MEMBERS_CHUNK') {
                                 let modified = false;
                                 let cleanMembers = event.members;
@@ -835,6 +980,105 @@
                                     };
                                 }
                             }
+
+                            // 9. Gateway Lazy Guild Member List Filtering (GUILD_MEMBER_LIST_UPDATE)
+                            // Crucial: eliminates blocked member from server member list at Gateway dispatch!
+                            if (event.type === 'GUILD_MEMBER_LIST_UPDATE') {
+                                let modified = false;
+                                const newEvent = { ...event };
+
+                                if (Array.isArray(newEvent.groups)) {
+                                    newEvent.groups = newEvent.groups.map(grp => {
+                                        if (!grp || typeof grp !== 'object') return grp;
+                                        const blockedCount = getBlockedCountForSection(grp.id || grp.title);
+                                        if (blockedCount > 0 && typeof grp.count === 'number') {
+                                            modified = true;
+                                            return { ...grp, count: Math.max(0, grp.count - blockedCount) };
+                                        }
+                                        return grp;
+                                    });
+                                }
+
+                                if (typeof newEvent.online_count === 'number' && blockedUserIdsSet.size > 0) {
+                                    const onlineBlocked = getBlockedCountForSection('online');
+                                    if (onlineBlocked > 0) {
+                                        newEvent.online_count = Math.max(0, newEvent.online_count - onlineBlocked);
+                                        modified = true;
+                                    }
+                                }
+
+                                if (Array.isArray(newEvent.ops)) {
+                                    const cleanOps = [];
+                                    for (let i = 0; i < newEvent.ops.length; i++) {
+                                        const op = newEvent.ops[i];
+                                        if (!op || typeof op !== 'object') {
+                                            cleanOps.push(op);
+                                            continue;
+                                        }
+
+                                        if (op.op === 'SYNC' && Array.isArray(op.items)) {
+                                            let itemsModified = false;
+                                            const cleanItems = [];
+
+                                            for (let j = 0; j < op.items.length; j++) {
+                                                const it = op.items[j];
+                                                if (!it || typeof it !== 'object') {
+                                                    cleanItems.push(it);
+                                                    continue;
+                                                }
+
+                                                if (it.group && typeof it.group === 'object') {
+                                                    const bCount = getBlockedCountForSection(it.group.id || it.group.title);
+                                                    if (bCount > 0 && typeof it.group.count === 'number') {
+                                                        itemsModified = true;
+                                                        cleanItems.push({
+                                                            ...it,
+                                                            group: { ...it.group, count: Math.max(0, it.group.count - bCount) }
+                                                        });
+                                                        continue;
+                                                    }
+                                                }
+
+                                                if (it.member && isMemberBlockedOrIgnored(it.member)) {
+                                                    itemsModified = true;
+                                                    continue; // Drop blocked member from SYNC items!
+                                                }
+
+                                                cleanItems.push(it);
+                                            }
+
+                                            if (itemsModified) {
+                                                modified = true;
+                                                cleanOps.push({ ...op, items: cleanItems });
+                                                continue;
+                                            }
+                                        }
+
+                                        if (op.op === 'INSERT' || op.op === 'UPDATE') {
+                                            if (op.item && (isMemberBlockedOrIgnored(op.item) || isMemberBlockedOrIgnored(op.item.member))) {
+                                                modified = true;
+                                                continue; // Drop blocked member insertion/update
+                                            }
+                                        }
+
+                                        cleanOps.push(op);
+                                    }
+                                    if (modified) newEvent.ops = cleanOps;
+                                }
+
+                                if (modified) {
+                                    args[0] = newEvent;
+                                }
+                            }
+
+                            // 10. Presence Update Filtering (PRESENCE_UPDATE)
+                            // Ensures blocked user is NEVER reported online to client stores
+                            if (event.type === 'PRESENCE_UPDATE') {
+                                const uid = event.user?.id || event.userId;
+                                if (uid && isBlockedOrIgnored(uid)) {
+                                    return; // Drop presence update completely
+                                }
+                            }
                         } catch (_) {}
                     }
                     return orig ? orig.apply(this, args) : null;
@@ -843,7 +1087,35 @@
 
             // --- 2. Store Layer Patches ---
 
-            // A. MemberListStore (Complete elimination from member lists & cards, zero black space, exact header counts)
+            // A. ChannelMemberStore (Primary Discord Mobile member list store - fixes empty black space & decrements headers)
+            if (ChannelMemberStore) {
+                if (typeof ChannelMemberStore.getProps === 'function') {
+                    safePatch('after', ChannelMemberStore, 'getProps', function(args, res) {
+                        return sanitizeChannelMemberProps(res);
+                    });
+                }
+                if (typeof ChannelMemberStore.getRows === 'function') {
+                    safePatch('after', ChannelMemberStore, 'getRows', function(args, res) {
+                        if (!Array.isArray(res)) return res;
+                        return res.filter(r => !isMemberBlockedOrIgnored(r));
+                    });
+                }
+            }
+
+            // Also check all metro modules for any store with getProps & getRows (ensures ChannelMemberStore is hooked)
+            try {
+                const modules = _metro.modules || (typeof vendetta !== 'undefined' && vendetta.metro?.modules) || {};
+                for (const id in modules) {
+                    const mod = modules[id]?.exports;
+                    if (!mod || typeof mod !== 'object') continue;
+                    if (typeof mod.getProps === 'function' && typeof mod.getRows === 'function' && mod !== ChannelMemberStore) {
+                        safePatch('after', mod, 'getProps', (args, res) => sanitizeChannelMemberProps(res));
+                        safePatch('after', mod, 'getRows', (args, res) => Array.isArray(res) ? res.filter(r => !isMemberBlockedOrIgnored(r)) : res);
+                    }
+                }
+            } catch (_) {}
+
+            // B. MemberListStore
             if (MemberListStore) {
                 if (typeof MemberListStore.getMemberListSections === 'function') {
                     safePatch('instead', MemberListStore, 'getMemberListSections', function(args, orig) {
@@ -876,7 +1148,7 @@
                 }
             }
 
-            // B. GuildMemberStore
+            // C. GuildMemberStore
             if (GuildMemberStore) {
                 if (typeof GuildMemberStore.getMember === 'function') {
                     safePatch('instead', GuildMemberStore, 'getMember', function(args, orig) {
@@ -915,7 +1187,45 @@
                 }
             }
 
-            // C. MessageStore
+            // D. PresenceStore (Ensures blocked users never appear online anywhere)
+            if (PresenceStore) {
+                if (typeof PresenceStore.getStatus === 'function') {
+                    safePatch('instead', PresenceStore, 'getStatus', function(args, orig) {
+                        const uid = args[0];
+                        if (uid && isBlockedOrIgnored(uid)) return 'offline';
+                        return orig ? orig.apply(this, args) : 'offline';
+                    });
+                }
+                if (typeof PresenceStore.getState === 'function') {
+                    safePatch('after', PresenceStore, 'getState', function(args, res) {
+                        if (!res || typeof res !== 'object') return res;
+                        const cloned = { ...res };
+                        for (const uid of blockedUserIdsSet) {
+                            if (cloned[uid]) delete cloned[uid];
+                        }
+                        return cloned;
+                    });
+                }
+                if (typeof PresenceStore.getPresences === 'function') {
+                    safePatch('after', PresenceStore, 'getPresences', function(args, res) {
+                        if (!res || typeof res !== 'object') return res;
+                        const cloned = { ...res };
+                        for (const uid of blockedUserIdsSet) {
+                            if (cloned[uid]) delete cloned[uid];
+                        }
+                        return cloned;
+                    });
+                }
+                if (typeof PresenceStore.isMobileOnline === 'function') {
+                    safePatch('instead', PresenceStore, 'isMobileOnline', function(args, orig) {
+                        const uid = args[0];
+                        if (uid && isBlockedOrIgnored(uid)) return false;
+                        return orig ? orig.apply(this, args) : false;
+                    });
+                }
+            }
+
+            // E. MessageStore
             if (MessageStore && typeof MessageStore.getMessage === 'function') {
                 safePatch('after', MessageStore, 'getMessage', function(args, res) {
                     if (res) sanitizeMessage(res);
@@ -923,7 +1233,7 @@
                 });
             }
 
-            // D. RowManager (Chat Rows & Zero Orphaned Date Dividers)
+            // F. RowManager (Chat Rows & Zero Orphaned Date Dividers)
             if (RowManager && RowManager.prototype) {
                 safePatch('before', RowManager.prototype, 'generate', function(args) {
                     const data = args[0];
@@ -1023,7 +1333,7 @@
                 }
             }
 
-            // E. Defensive Guards for updateRows and createRow
+            // G. Defensive Guards for updateRows and createRow
             try {
                 const modules = _metro.modules || (typeof vendetta !== 'undefined' && vendetta.metro?.modules) || {};
                 for (const id in modules) {
@@ -1065,7 +1375,7 @@
                 }
             } catch (_) {}
 
-            // F. TypingStore
+            // H. TypingStore
             if (TypingStore && typeof TypingStore.getTypingUsers === 'function') {
                 safePatch('instead', TypingStore, 'getTypingUsers', function(args, orig) {
                     const res = orig ? orig.apply(this, args) : {};
@@ -1078,7 +1388,7 @@
                 });
             }
 
-            // G. RelationshipStore
+            // I. RelationshipStore
             if (RelationshipStore) {
                 if (typeof RelationshipStore.getBlockedUserIds === 'function') {
                     safePatch('instead', RelationshipStore, 'getBlockedUserIds', () => []);
@@ -1119,7 +1429,7 @@
                 }
             }
 
-            // H. UserStore
+            // J. UserStore
             if (UserStore && typeof UserStore.getUser === 'function') {
                 safePatch('after', UserStore, 'getUser', function(args, res) {
                     if (res && isBlockedOrIgnored(res.id)) {
@@ -1188,22 +1498,93 @@
             } catch (_) {}
 
             // --- 5. Universal React.createElement & JSX Runtime Interceptor ---
-            // Filters member arrays directly in props, preventing black spaces and updating header counts!
+            // Eliminates wrapper slots from Card children, updates header text, and sanitizes arrays!
             function sanitizeElementProps(props) {
                 if (!props || typeof props !== 'object') return props;
-                let modified = false;
                 let newProps = props;
 
-                // 1. Sanitize sections array
-                if (Array.isArray(newProps.sections)) {
-                    const safe = getSafeSectionProps(newProps);
-                    if (safe !== newProps) {
-                        newProps = safe;
-                        modified = true;
+                // 1. Sanitize Card children (PRUNES EMPTY WRAPPER SLOTS, PREVENTING BLACK SPACES!)
+                if (Array.isArray(newProps.children)) {
+                    let childRemoved = 0;
+                    const cleanChildren = [];
+                    for (let i = 0; i < newProps.children.length; i++) {
+                        const child = newProps.children[i];
+                        if (isBlockedElementOrWrapper(child)) {
+                            childRemoved++;
+                            continue; // DO NOT RENDER THE WRAPPER CONTAINER AT ALL!
+                        }
+                        cleanChildren.push(child);
+                    }
+
+                    // Clean up trailing or consecutive dividers
+                    const finalChildren = [];
+                    for (let i = 0; i < cleanChildren.length; i++) {
+                        const c = cleanChildren[i];
+                        if (isDividerElement(c)) {
+                            if (finalChildren.length === 0) continue;
+                            if (isDividerElement(finalChildren[finalChildren.length - 1])) continue;
+                        }
+                        finalChildren.push(c);
+                    }
+                    while (finalChildren.length > 0 && isDividerElement(finalChildren[finalChildren.length - 1])) {
+                        finalChildren.pop();
+                    }
+
+                    if (childRemoved > 0) {
+                        if (finalChildren.length === 0) {
+                            newProps = {
+                                ...newProps,
+                                children: [],
+                                style: [{ height: 0, width: 0, opacity: 0, overflow: 'hidden' }, newProps.style]
+                            };
+                        } else {
+                            newProps = { ...newProps, children: finalChildren };
+                            newProps = updateHeaderCount(newProps, childRemoved);
+                        }
                     }
                 }
 
-                // 2. Sanitize members array in card/list components
+                // 2. Sanitize Header Text (e.g. "Online — 2" -> "Online — 1")
+                if (typeof newProps.children === 'string') {
+                    const text = newProps.children;
+                    const match = text.match(/^([A-Za-z0-9_\s]+)\s*[—–-]\s*(\d+)/i);
+                    if (match) {
+                        const sectionType = match[1];
+                        const count = parseInt(match[2], 10);
+                        const blockedCount = getBlockedCountForSection(sectionType);
+                        if (blockedCount > 0) {
+                            const newCount = Math.max(0, count - blockedCount);
+                            newProps = {
+                                ...newProps,
+                                children: text.replace(/(\d+)(?=[^\d]*$)/, String(newCount))
+                            };
+                        }
+                    }
+                } else if (Array.isArray(newProps.children) && newProps.children.length >= 2) {
+                    const firstStr = String(newProps.children[0] || '');
+                    if (/([A-Za-z0-9_\s]+)\s*[—–-]/i.test(firstStr)) {
+                        const blockedCount = getBlockedCountForSection(firstStr);
+                        if (blockedCount > 0) {
+                            const clonedChildren = [...newProps.children];
+                            const lastIdx = clonedChildren.length - 1;
+                            if (typeof clonedChildren[lastIdx] === 'number') {
+                                clonedChildren[lastIdx] = Math.max(0, clonedChildren[lastIdx] - blockedCount);
+                                newProps = { ...newProps, children: clonedChildren };
+                            } else if (typeof clonedChildren[lastIdx] === 'string' && /\d+/.test(clonedChildren[lastIdx])) {
+                                clonedChildren[lastIdx] = clonedChildren[lastIdx].replace(/(\d+)/, m => String(Math.max(0, parseInt(m, 10) - blockedCount)));
+                                newProps = { ...newProps, children: clonedChildren };
+                            }
+                        }
+                    }
+                }
+
+                // 3. Sanitize sections array
+                if (Array.isArray(newProps.sections)) {
+                    const safe = getSafeSectionProps(newProps);
+                    if (safe !== newProps) newProps = safe;
+                }
+
+                // 4. Sanitize members array in card/list components
                 if (Array.isArray(newProps.members)) {
                     const origLen = newProps.members.length;
                     const filtered = newProps.members.filter(m => !isMemberBlockedOrIgnored(m));
@@ -1211,11 +1592,10 @@
                     if (diff > 0) {
                         newProps = { ...newProps, members: filtered };
                         newProps = updateHeaderCount(newProps, diff);
-                        modified = true;
                     }
                 }
 
-                // 3. Sanitize rows array in member list components
+                // 5. Sanitize rows array in member list components
                 if (Array.isArray(newProps.rows) && newProps.rows.some(r => r && (r.userId || r.user || r.member))) {
                     const origLen = newProps.rows.length;
                     const filtered = newProps.rows.filter(m => !isMemberBlockedOrIgnored(m));
@@ -1223,11 +1603,10 @@
                     if (diff > 0) {
                         newProps = { ...newProps, rows: filtered };
                         newProps = updateHeaderCount(newProps, diff);
-                        modified = true;
                     }
                 }
 
-                // 4. Sanitize items array in member list components
+                // 6. Sanitize items array in member list components
                 if (Array.isArray(newProps.items) && newProps.items.some(r => r && (r.userId || r.user || r.member))) {
                     const origLen = newProps.items.length;
                     const filtered = newProps.items.filter(m => !isMemberBlockedOrIgnored(m));
@@ -1235,17 +1614,13 @@
                     if (diff > 0) {
                         newProps = { ...newProps, items: filtered };
                         newProps = updateHeaderCount(newProps, diff);
-                        modified = true;
                     }
                 }
 
-                // 5. Sanitize data array in lists
+                // 7. Sanitize data array in lists
                 if (Array.isArray(newProps.data)) {
                     const safe = getSafeListProps(newProps);
-                    if (safe !== newProps) {
-                        newProps = safe;
-                        modified = true;
-                    }
+                    if (safe !== newProps) newProps = safe;
                 }
 
                 return newProps;
@@ -1294,30 +1669,30 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v2.8.0] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v2.9.0] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v2.8.0 Error]', e);
+            console.error('[MasterSuite Mobile v2.9.0 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v2.8.0] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v2.9.0] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v2.8.0] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v2.9.0] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v2.8.0 Error stopping]', e);
+            console.error('[MasterSuite Mobile v2.9.0 Error stopping]', e);
         }
     }
 
     exports.default = {
         name: 'Antigravity Master Suite',
-        description: 'All-in-One: Complete zero-gap member elimination (no black spaces, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
+        description: 'All-in-One: Multi-layer zero-gap memberlist elimination (zero black space, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '2.8.0',
+        version: '2.9.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
