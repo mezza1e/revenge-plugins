@@ -95,7 +95,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.0 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.1 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -103,7 +103,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.0 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.0.1 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -1695,14 +1695,14 @@
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.0] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.1] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.0] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.1] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.0 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.1 Error stopping]', e);
         }
     }
 
@@ -1710,7 +1710,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.0',
+        version: '3.0.1',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
