@@ -3,26 +3,35 @@
 High-performance, memory-optimized, and error-resilient plugins for Discord Mobile on Revengecord.
 
 ## 🚀 Quick Install (All-in-One Master Suite)
-To install all features in **one single URL**:
-```
-https://raw.githubusercontent.com/mezza1e/revenge-plugins/main/
+
+In the Revengecord mobile app, open **Settings > Plugins > Install Plugin** and paste this exact URL:
+
+```text
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@v1.0.0/
 ```
 
+*(Alternative GitHub Pages URL: `https://mezza1e.github.io/revenge-plugins/`)*
+
+> [!IMPORTANT]
+> **Do not append `/index.js` or `manifest.json` to the URL!**
+> Revengecord requires the base directory URL ending in `/`. It automatically fetches `manifest.json` and then loads the plugin code.
+
 ### Included Features:
-1. **ByeBlocked**: 100% elimination of blocked user messages, typing indicators, reactions, and settings listings.
-2. **DiscordMemoryEngine**: LRU message cache bounds (4 channels max) + `FlatList` view virtualization (`removeClippedSubviews`).
+1. **ByeBlocked**: 100% elimination of blocked user messages, collapsed bars, typing indicators, reactions, and settings listings.
+2. **DiscordMemoryEngine**: LRU message cache bounds (4 channels max) + FlatList view virtualization.
 3. **DiscordMessageReliability**: Eliminates "Messages failed to load" errors via automatic retry, pre-flight gateway sync, and silent Flux auto-recovery.
 
 ---
 
 ## 📦 Individual Plugin URLs
+
 If you prefer installing features separately:
 
 * **ByeBlocked Only:**
-  `https://raw.githubusercontent.com/mezza1e/revenge-plugins/main/byeblocked/`
+  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@v1.0.0/byeblocked/`
 
 * **MemoryEngine Only:**
-  `https://raw.githubusercontent.com/mezza1e/revenge-plugins/main/memoryengine/`
+  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@v1.0.0/memoryengine/`
 
 * **MessageReliability Only:**
-  `https://raw.githubusercontent.com/mezza1e/revenge-plugins/main/messagereliability/`
+  `https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@v1.0.0/messagereliability/`
