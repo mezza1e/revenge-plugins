@@ -134,7 +134,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.9 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.1.0 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -142,7 +142,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.9 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.1.0 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -1007,7 +1007,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.0.9] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.1.0] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -1086,7 +1086,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.0.9] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.1.0] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
     // Gateway Member List Sanitizer: purges blocked users from Gateway SYNC ops and decrements group counts
     function sanitizeMemberListUpdate(event) {
@@ -1339,19 +1339,6 @@
                     });
                 }
             }
-
-            // Also check all metro modules for any store with getProps & getRows
-            try {
-                const modules = _metro.modules || (typeof vendetta !== 'undefined' && vendetta.metro?.modules) || {};
-                for (const id in modules) {
-                    const mod = modules[id]?.exports;
-                    if (!mod || typeof mod !== 'object') continue;
-                    if (typeof mod.getProps === 'function' && typeof mod.getRows === 'function' && mod !== ChannelMemberStore) {
-                        safePatch('after', mod, 'getProps', (args, res) => sanitizeDesktopStyleChannelMembers(res));
-                        safePatch('after', mod, 'getRows', (args, res) => Array.isArray(res) ? res.filter(r => !isMemberBlockedOrIgnored(r)) : res);
-                    }
-                }
-            } catch (_) {}
 
             // B. MemberListStore
             if (MemberListStore) {
@@ -1685,30 +1672,6 @@
                 });
             }
 
-            // --- 3. React List Component Patches ---
-            const ListComponents = _metro.findByProps('FlatList', 'SectionList') ||
-                                   _metro.findByProps('FlatList') ||
-                                   {};
-            const FlatList = ListComponents.FlatList ||
-                             (_metro.findByName && _metro.findByName('FlatList')) ||
-                             (typeof uiComponents !== 'undefined' && uiComponents.FlatList);
-            const SectionList = ListComponents.SectionList ||
-                                (_metro.findByName && _metro.findByName('SectionList')) ||
-                                (typeof uiComponents !== 'undefined' && uiComponents.SectionList);
-            const FlashList = ListComponents.FlashList ||
-                              (_metro.findByProps && _metro.findByProps('FlashList')?.FlashList) ||
-                              (_metro.findByName && _metro.findByName('FlashList')) ||
-                              (typeof uiComponents !== 'undefined' && uiComponents.FlashList);
-            const VirtualizedList = ListComponents.VirtualizedList ||
-                                    (_metro.findByProps && _metro.findByProps('VirtualizedList')?.VirtualizedList) ||
-                                    (_metro.findByName && _metro.findByName('VirtualizedList')) ||
-                                    (typeof uiComponents !== 'undefined' && uiComponents.VirtualizedList);
-
-            patchListComponent(FlatList, false);
-            patchListComponent(SectionList, true);
-            patchListComponent(FlashList, false);
-            patchListComponent(VirtualizedList, false);
-
             // --- 4. Settings Form Components Hook ---
             try {
                 const settingsTargetMods = new Set();
@@ -1770,155 +1733,23 @@
                 }
             } catch (_) {}
 
-            // --- 6. Universal React.createElement & JSX Runtime Interceptor ---
-            function sanitizeElementProps(props) {
-                if (!props || typeof props !== 'object') return props;
-                let newProps = props;
-
-                // 1. ChannelMembers desktop-style 1:1 row & group index recalculation
-                if (Array.isArray(newProps.rows) && Array.isArray(newProps.groups)) {
-                    newProps = sanitizeDesktopStyleChannelMembers(newProps);
-                }
-
-                // 2. Sanitize Card children (PRUNES EMPTY WRAPPER SLOTS, PREVENTING BLACK SPACES!)
-                if (Array.isArray(newProps.children)) {
-                    let childRemoved = 0;
-                    const cleanChildren = [];
-                    for (let i = 0; i < newProps.children.length; i++) {
-                        const child = newProps.children[i];
-                        if (isBlockedElementOrWrapper(child)) {
-                            childRemoved++;
-                            continue; // DO NOT RENDER THE WRAPPER CONTAINER AT ALL!
-                        }
-                        cleanChildren.push(child);
-                    }
-
-                    // Clean up trailing or consecutive dividers
-                    const finalChildren = [];
-                    for (let i = 0; i < cleanChildren.length; i++) {
-                        const c = cleanChildren[i];
-                        if (isDividerElement(c)) {
-                            if (finalChildren.length === 0) continue;
-                            if (isDividerElement(finalChildren[finalChildren.length - 1])) continue;
-                        }
-                        finalChildren.push(c);
-                    }
-                    while (finalChildren.length > 0 && isDividerElement(finalChildren[finalChildren.length - 1])) {
-                        finalChildren.pop();
-                    }
-
-                    if (childRemoved > 0) {
-                        if (finalChildren.length === 0) {
-                            newProps = {
-                                ...newProps,
-                                children: [],
-                                style: [{ height: 0, width: 0, opacity: 0, overflow: 'hidden' }, newProps.style]
-                            };
-                        } else {
-                            newProps = { ...newProps, children: finalChildren };
-                            newProps = updateHeaderCount(newProps, childRemoved);
-                        }
-                    }
-                }
-
-                // 3. Header text counts are already accurately handled by group.title in sanitizeDesktopStyleChannelMembers
-
-                // 4. Sanitize sections array
-                if (Array.isArray(newProps.sections)) {
-                    const safe = getSafeSectionProps(newProps);
-                    if (safe !== newProps) newProps = safe;
-                }
-
-                // 5. Sanitize members array in card/list components
-                if (Array.isArray(newProps.members)) {
-                    const origLen = newProps.members.length;
-                    const filtered = newProps.members.filter(m => !isMemberBlockedOrIgnored(m));
-                    const diff = origLen - filtered.length;
-                    if (diff > 0) {
-                        newProps = { ...newProps, members: filtered };
-                        newProps = updateHeaderCount(newProps, diff);
-                    }
-                }
-
-                // 6. Sanitize items array in member list components
-                if (Array.isArray(newProps.items) && newProps.items.some(r => r && (r.userId || r.user || r.member))) {
-                    const origLen = newProps.items.length;
-                    const filtered = newProps.items.filter(m => !isMemberBlockedOrIgnored(m));
-                    const diff = origLen - filtered.length;
-                    if (diff > 0) {
-                        newProps = { ...newProps, items: filtered };
-                        newProps = updateHeaderCount(newProps, diff);
-                    }
-                }
-
-                // 7. Sanitize data array in lists
-                if (Array.isArray(newProps.data)) {
-                    const safe = getSafeListProps(newProps);
-                    if (safe !== newProps) newProps = safe;
-                }
-
-                return newProps;
-            }
-
-            try {
-                if (React && typeof React.createElement === 'function') {
-                    const origCreateElement = React.createElement;
-                    safePatch('instead', React, 'createElement', function(args, orig) {
-                        let props = args[1];
-                        if (props && typeof props === 'object') {
-                            if (shouldAbsorbElement(props)) {
-                                return orig.call(React, View, {
-                                    style: { height: 0, width: 0, opacity: 0, overflow: 'hidden' },
-                                    pointerEvents: 'none'
-                                });
-                            }
-                            props = sanitizeElementProps(props);
-                            args[1] = props;
-                        }
-                        return orig.apply(React, args);
-                    });
-                }
-
-                const JsxRuntime = (_metro.findByProps && (_metro.findByProps('jsx', 'jsxs') || _metro.findByProps('jsx')));
-                if (JsxRuntime) {
-                    ['jsx', 'jsxs'].forEach(fnKey => {
-                        if (typeof JsxRuntime[fnKey] === 'function') {
-                            safePatch('instead', JsxRuntime, fnKey, function(args, orig) {
-                                let props = args[1];
-                                if (props && typeof props === 'object') {
-                                    if (shouldAbsorbElement(props)) {
-                                        return orig.call(this, View, {
-                                            style: { height: 0, width: 0, opacity: 0, overflow: 'hidden' },
-                                            pointerEvents: 'none'
-                                        });
-                                    }
-                                    props = sanitizeElementProps(props);
-                                    args[1] = props;
-                                }
-                                return orig ? orig.apply(this, args) : null;
-                            });
-                        }
-                    });
-                }
-            } catch (_) {}
-
             notifyActive();
-            console.log('[MasterSuite Mobile v3.0.9] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.1.0] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.9 Error]', e);
+            console.error('[MasterSuite Mobile v3.1.0 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.9] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.1.0] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.9] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.1.0] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.9 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.1.0 Error stopping]', e);
         }
     }
 
@@ -1926,7 +1757,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.9',
+        version: '3.1.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
