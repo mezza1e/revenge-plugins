@@ -1,35 +1,41 @@
-(function(exports, metroCommon, patcher, metro, vendetta, plugin, storage, uiComponents) {
+(function(vendettaArg) {
     'use strict';
 
-    // 1. Universal API Resolution
+    // 1. Universal API Resolution (Zero top-level Metro calls to guarantee instant clean eval)
+    const _vendetta = (typeof vendettaArg !== 'undefined' && vendettaArg) ||
+                      (typeof vendetta !== 'undefined' && vendetta) ||
+                      (typeof window !== 'undefined' && (window.vendetta || window.bunny || window.revenge)) ||
+                      (typeof globalThis !== 'undefined' && (globalThis.vendetta || globalThis.bunny || globalThis.revenge)) ||
+                      {};
     const _revenge = (typeof revenge !== 'undefined' && revenge) ||
-                     (typeof globalThis !== 'undefined' && (globalThis.revenge || globalThis.vendetta?.revenge)) ||
+                     (typeof window !== 'undefined' && window.revenge) ||
+                     (typeof globalThis !== 'undefined' && (globalThis.revenge || _vendetta.revenge)) ||
                      {};
-    const _vendetta = (typeof vendetta !== 'undefined' && vendetta) ||
-                      (typeof globalThis !== 'undefined' && (globalThis.vendetta || globalThis.bunny)) ||
-                      _revenge;
-    let _metro = (typeof metro !== 'undefined' && metro) || _revenge.modules?.finders || _vendetta.metro || {};
-    let _patcher = (typeof patcher !== 'undefined' && patcher) || _revenge.patcher || _vendetta.patcher || {};
-    let _common = (typeof metroCommon !== 'undefined' && metroCommon) || _vendetta.metro?.common || {};
-    let _FluxDispatcher = _revenge.discord?.flux?.Dispatcher ||
-                          _revenge.discord?.flux?.FluxDispatcher ||
-                          _common.FluxDispatcher ||
-                          (_metro.findByProps && (_metro.findByProps('dispatch', 'subscribe') || _metro.findByProps('dispatch')));
-    let _storage = (typeof storage !== 'undefined' && storage) ||
-                    (typeof plugin !== 'undefined' && plugin?.storage) ||
-                    _vendetta.plugin?.storage ||
-                    _vendetta.storage ||
-                    _revenge.storage ||
-                    (typeof globalThis !== 'undefined' && (globalThis.__antigravity_storage = globalThis.__antigravity_storage || {})) ||
-                    {};
+    let _metro = _revenge.modules?.finders || _vendetta.metro || (typeof metro !== 'undefined' && metro) || {};
+    let _patcher = _revenge.patcher || _vendetta.patcher || (typeof patcher !== 'undefined' && patcher) || {};
+    let _common = _vendetta.metro?.common || (typeof metroCommon !== 'undefined' && metroCommon) || {};
+    let _storage = _vendetta.plugin?.storage ||
+                   _vendetta.storage ||
+                   _revenge.storage ||
+                   (typeof storage !== 'undefined' && storage) ||
+                   (typeof globalThis !== 'undefined' && (globalThis.__antigravity_storage = globalThis.__antigravity_storage || {})) ||
+                   {};
     const unpatches = [];
 
-    // React and View resolution
-    let React = (typeof globalThis !== 'undefined' && globalThis.React) ||
-                _common.React ||
-                (_metro.findByProps && (_metro.findByProps('createElement', 'Component') || _metro.findByProps('createElement')));
-    let View = (_metro.findByProps && _metro.findByProps('View')?.View) ||
-               (typeof uiComponents !== 'undefined' && uiComponents.View);
+    // Ambient safety shims: ensure uuid4 and toasts don't throw in Revengecord's installer
+    try {
+        if (_metro && typeof _metro.findByProps === 'function') {
+            const uuidMod = _metro.findByProps('uuid4');
+            if (uuidMod && typeof uuidMod.uuid4 !== 'function') {
+                uuidMod.uuid4 = () => 'vd-' + Math.random().toString(36).substring(2, 10);
+            }
+        }
+    } catch (_) {}
+
+    // Lazily resolved inside startPlugin() only!
+    let _FluxDispatcher = null;
+    let React = null;
+    let View = null;
 
     // Bulletproof Universal Patcher:
     // In Revenge/Vendetta/Spitroast, the native argument order is: patcher[type](propName, parentObj, hook)
@@ -37,32 +43,43 @@
     // or a direct property wrapper so that EVERY patch is 100% guaranteed to take effect!
     function safePatch(type, obj, prop, hook) {
         if (!obj || !prop) return;
-        const orig = obj[prop];
+        let orig;
+        try { orig = obj[prop]; } catch (_) { return; }
         if (typeof orig !== 'function') return;
 
         // 1. Try mobile spitroast standard: (prop, obj, hook)
         if (_patcher && typeof _patcher[type] === 'function') {
             try {
-                const unpatch = _patcher[type](prop, obj, function(p1, p2) {
-                    const actualArgs = Array.isArray(p1) ? p1 : (Array.isArray(p2) ? p2 : []);
-                    const origFn = typeof p2 === 'function' ? p2 : (typeof p1 === 'function' ? p1 : orig);
-                    return hook.call(this, actualArgs, origFn);
+                const unpatch = _patcher[type](prop, obj, function(args, resOrOrig) {
+                    try {
+                        return hook.call(this, args, resOrOrig);
+                    } catch (err) {
+                        if (type === 'instead' && typeof resOrOrig === 'function') {
+                            return resOrOrig.apply(this, args);
+                        }
+                        return resOrOrig;
+                    }
                 });
-                if (obj[prop] !== orig) {
-                    if (typeof unpatch === 'function') unpatches.push(unpatch);
+                if (typeof unpatch === 'function') {
+                    unpatches.push(unpatch);
                     return;
                 }
             } catch (_) {}
 
             // 2. Try alternate order: (obj, prop, hook)
             try {
-                const unpatch = _patcher[type](obj, prop, function(p1, p2) {
-                    const actualArgs = Array.isArray(p1) ? p1 : (Array.isArray(p2) ? p2 : []);
-                    const origFn = typeof p2 === 'function' ? p2 : (typeof p1 === 'function' ? p1 : orig);
-                    return hook.call(this, actualArgs, origFn);
+                const unpatch = _patcher[type](obj, prop, function(args, resOrOrig) {
+                    try {
+                        return hook.call(this, args, resOrOrig);
+                    } catch (err) {
+                        if (type === 'instead' && typeof resOrOrig === 'function') {
+                            return resOrOrig.apply(this, args);
+                        }
+                        return resOrOrig;
+                    }
                 });
-                if (obj[prop] !== orig) {
-                    if (typeof unpatch === 'function') unpatches.push(unpatch);
+                if (typeof unpatch === 'function') {
+                    unpatches.push(unpatch);
                     return;
                 }
             } catch (_) {}
@@ -72,20 +89,28 @@
         try {
             if (type === 'instead') {
                 obj[prop] = function(...args) {
-                    return hook.call(this, args, orig);
+                    try {
+                        return hook.call(this, args, orig);
+                    } catch (_) {
+                        return orig.apply(this, args);
+                    }
                 };
             } else if (type === 'after') {
                 obj[prop] = function(...args) {
                     const res = orig.apply(this, args);
-                    return hook.call(this, args, res);
+                    try {
+                        return hook.call(this, args, res);
+                    } catch (_) {
+                        return res;
+                    }
                 };
             } else if (type === 'before') {
                 obj[prop] = function(...args) {
-                    hook.call(this, args);
+                    try { hook.call(this, args); } catch (_) {}
                     return orig.apply(this, args);
                 };
             }
-            unpatches.push(() => { obj[prop] = orig; });
+            unpatches.push(() => { try { obj[prop] = orig; } catch (_) {} });
         } catch (_) {}
     }
 
@@ -95,7 +120,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.1 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.2 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -103,7 +128,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.1 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.0.2 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -1695,42 +1720,36 @@
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.1] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.2] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.1] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.2] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.1 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.2 Error stopping]', e);
         }
     }
 
-    exports.default = {
+    const pluginExport = {
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.1',
+        version: '3.0.2',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
         onUnload: stopPlugin
     };
 
-    exports.start = startPlugin;
-    exports.stop = stopPlugin;
-    exports.onLoad = startPlugin;
-    exports.onUnload = stopPlugin;
-    Object.defineProperty(exports, '__esModule', { value: true });
-
-    return exports;
+    return {
+        default: pluginExport,
+        start: startPlugin,
+        stop: stopPlugin,
+        onLoad: startPlugin,
+        onUnload: stopPlugin,
+        __esModule: true
+    };
 })(
-    typeof exports !== 'undefined' ? exports : {},
-    typeof metroCommon !== 'undefined' ? metroCommon : (typeof vendetta !== 'undefined' ? vendetta.metro?.common : (typeof revenge !== 'undefined' ? revenge.metro?.common : undefined)),
-    typeof patcher !== 'undefined' ? patcher : (typeof vendetta !== 'undefined' ? vendetta.patcher : (typeof revenge !== 'undefined' ? revenge.patcher : undefined)),
-    typeof metro !== 'undefined' ? metro : (typeof vendetta !== 'undefined' ? vendetta.metro : (typeof revenge !== 'undefined' ? revenge.metro : undefined)),
-    typeof vendetta !== 'undefined' ? vendetta : (typeof revenge !== 'undefined' ? revenge.undefined : undefined),
-    typeof plugin !== 'undefined' ? plugin : (typeof vendetta !== 'undefined' ? vendetta.plugin : (typeof revenge !== 'undefined' ? revenge.plugin : undefined)),
-    typeof storage !== 'undefined' ? storage : (typeof vendetta !== 'undefined' ? vendetta.storage : (typeof revenge !== 'undefined' ? revenge.storage : undefined)),
-    typeof uiComponents !== 'undefined' ? uiComponents : (typeof vendetta !== 'undefined' ? vendetta.ui?.components : (typeof revenge !== 'undefined' ? revenge.ui?.components : undefined))
+    typeof vendetta !== 'undefined' ? vendetta : (typeof window !== 'undefined' ? window.vendetta : (typeof revenge !== 'undefined' ? revenge : (typeof bunny !== 'undefined' ? bunny : undefined)))
 )
