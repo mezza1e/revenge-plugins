@@ -1,13 +1,13 @@
 {
-  "name": "ByeBlocked",
-  "description": "All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.",
-  "authors": [
-    {
-      "name": "Antigravity",
-      "id": "698947564459917343"
-    }
-  ],
-  "main": "index.js",
-  "version": "3.0.3",
-  "hash": "f47616aa5869a3953fae10e8fae144bf5a1d80440f43675e8ae9c2e11e224408"
+    "name": "ByeBlocked",
+    "description": "All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.",
+    "authors": [
+        {
+            "name": "Antigravity",
+            "id": "698947564459917343"
+        }
+    ],
+    "main": "index.js",
+    "version": "3.0.4",
+    "hash": "f47616aa5869a3953fae10e8fae144bf5a1d80440f43675e8ae9c2e11e224408"
 }

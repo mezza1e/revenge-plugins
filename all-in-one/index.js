@@ -112,7 +112,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.3 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.4 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -120,7 +120,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.3 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.0.4 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -219,6 +219,10 @@
     function isBlockedOrIgnored(userId) {
         if (!userId) return false;
         const s = String(userId);
+        try {
+            const myId = UserStore?.getCurrentUser?.()?.id;
+            if (myId && s === String(myId)) return false;
+        } catch (_) {}
         if (blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s)) return true;
 
         if (rawIsBlocked && RelationshipStore) {
@@ -245,6 +249,11 @@
     // Member discriminator: dynamically checks member's Snowflake User ID against relationship tracker
     function isMemberBlockedOrIgnored(item) {
         if (!item || typeof item !== 'object') return false;
+        try {
+            const myId = UserStore?.getCurrentUser?.()?.id;
+            const uid = item.userId || item.id || item.user?.id || item.member?.userId || item.member?.user?.id;
+            if (myId && uid && String(uid) === String(myId)) return false;
+        } catch (_) {}
 
         // Guard against pure Channel or Guild navigation items that have no user/member data
         if (!item.user && !item.member && !item.userId && !item.author && !item.record &&
@@ -275,12 +284,32 @@
         return false;
     }
 
-    function isSettingsBlockedSection(sectionOrTitle) {
-        if (!sectionOrTitle) return false;
-        const text = typeof sectionOrTitle === 'string' ? sectionOrTitle : (sectionOrTitle.title || sectionOrTitle.header || sectionOrTitle.key || '');
-        if (typeof text !== 'string') return false;
-        const lower = text.toLowerCase();
-        return lower.includes('blocked user') || lower.includes('blocked') || lower.includes('ignored');
+    function isSettingsBlockedSection(val, depth = 0) {
+        if (!val || depth > 5) return false;
+        if (typeof val === 'string') {
+            const lower = val.trim().toLowerCase();
+            return lower.includes("accounts you've blocked or ignored") ||
+                   lower.includes("accounts you've blocked") ||
+                   lower.includes("blocked or ignored") ||
+                   lower.startsWith("blocked accounts") ||
+                   lower.startsWith("ignored accounts") ||
+                   lower === "blocked users" ||
+                   lower === "ignored users" ||
+                   (lower === "blocked" && depth > 0);
+        }
+        if (typeof val === 'object') {
+            for (const k of ['label', 'text', 'title', 'header', 'subLabel', 'description', 'accessibilityLabel', 'aria-label']) {
+                if (val[k] && isSettingsBlockedSection(val[k], depth + 1)) return true;
+            }
+            if (val.props && isSettingsBlockedSection(val.props, depth + 1)) return true;
+            if (typeof val.children === 'string' && isSettingsBlockedSection(val.children, depth + 1)) return true;
+            if (Array.isArray(val.children)) {
+                for (const c of val.children) {
+                    if (typeof c === 'string' && isSettingsBlockedSection(c, depth + 1)) return true;
+                }
+            }
+        }
+        return false;
     }
 
     // Decrement count in header strings (e.g. "Online — 2" -> "Online — 1") targeting the count at the end
@@ -319,9 +348,6 @@
             } else if (isOffline && (status === 'offline' || !status)) {
                 count++;
             }
-        }
-        if (count === 0 && isOnline && blockedUserIdsSet.size > 0) {
-            count = blockedUserIdsSet.size;
         }
         return count;
     }
@@ -509,52 +535,76 @@
         const newRows = [];
         let hiddenRows = false;
 
+        let currentGroup = null;
+        let currentGroupVisibleCount = 0;
+        const groupMap = new Map();
+        newGroups.forEach(g => { if (g.id) groupMap.set(g.id, g); });
+
         for (let i = 0; i < props.rows.length; i++) {
             const row = props.rows[i];
-            if (!row || row.type !== 'MEMBER') {
-                newRows.push({ ...row });
-            } else if (!isMemberBlockedOrIgnored(row)) {
-                newRows.push({ ...row });
-            } else {
-                hiddenRows = true;
-                // Decrement preceding GROUP row count and matching group in newGroups
-                for (let j = newRows.length - 1; j >= 0; j--) {
-                    if (newRows[j].type === 'GROUP' || newRows[j].rowType === 'GROUP' || newRows[j].header === true) {
-                        const targetId = newRows[j].id;
-                        const grp = newGroups.find(g => g.id === targetId);
-                        if (grp) {
-                            grp.count = Math.max(0, grp.count - 1);
-                            if (typeof grp.title === 'string') {
-                                grp.title = grp.title.replace(/(\d+)(?=[^\d]*$)/, String(grp.count));
-                            }
-                            newRows[j].count = grp.count;
-                            if (typeof newRows[j].title === 'string') {
-                                newRows[j].title = newRows[j].title.replace(/(\d+)(?=[^\d]*$)/, String(grp.count));
-                            }
-                        }
-                        break;
+            if (!row || typeof row !== 'object') continue;
+
+            const isGroupRow = row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true ||
+                               (typeof row.id === 'string' && groupMap.has(row.id));
+
+            if (isGroupRow) {
+                if (currentGroup) {
+                    currentGroup.count = currentGroupVisibleCount;
+                    if (typeof currentGroup.title === 'string') {
+                        currentGroup.title = currentGroup.title.replace(/(\d+)(?=[^\d]*$)/, String(currentGroupVisibleCount));
                     }
                 }
+                currentGroup = row;
+                currentGroupVisibleCount = 0;
+                newRows.push(row);
+                continue;
+            }
+
+            if (isMemberBlockedOrIgnored(row)) {
+                hiddenRows = true;
+                continue; // Omit blocked member row
+            }
+
+            currentGroupVisibleCount++;
+            newRows.push(row);
+        }
+
+        if (currentGroup) {
+            currentGroup.count = currentGroupVisibleCount;
+            if (typeof currentGroup.title === 'string') {
+                currentGroup.title = currentGroup.title.replace(/(\d+)(?=[^\d]*$)/, String(currentGroupVisibleCount));
             }
         }
 
         if (hiddenRows) {
-            // CRUCIAL: Recalculate group index offsets!
-            // When index offsets are recalculated, the virtualization engine places subsequent groups immediately,
-            // completely eliminating the empty 48px black space!
-            let indexSum = 0;
-            for (let i = 0; i < newGroups.length; i++) {
-                if (newGroups[i].id !== 'content-inventory-feed') {
-                    newGroups[i].index = indexSum;
-                    if (newGroups[i].count > 0) {
-                        indexSum += (newGroups[i].count + 1);
+            for (const row of newRows) {
+                if (row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true || (typeof row.id === 'string' && groupMap.has(row.id))) {
+                    const grp = groupMap.get(row.id);
+                    if (grp) {
+                        grp.count = row.count;
+                        grp.title = row.title;
                     }
                 }
             }
 
-            // Remove empty 0-count group headers
-            const finalRows = newRows.filter(r => !( (r.type === 'GROUP' || r.rowType === 'GROUP') && r.count <= 0 ));
             const finalGroups = newGroups.filter(g => g && (g.count > 0 || g.id === 'content-inventory-feed'));
+            const validGroupIds = new Set(finalGroups.map(g => g.id));
+
+            const finalRows = newRows.filter(r => {
+                const isGroup = r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true || (typeof r.id === 'string' && groupMap.has(r.id));
+                if (isGroup) {
+                    return validGroupIds.has(r.id);
+                }
+                return true;
+            });
+
+            let indexSum = 0;
+            for (let i = 0; i < finalGroups.length; i++) {
+                if (finalGroups[i].id !== 'content-inventory-feed') {
+                    finalGroups[i].index = indexSum;
+                    indexSum += (finalGroups[i].count + 1);
+                }
+            }
 
             return {
                 ...props,
@@ -588,7 +638,7 @@
                 ['data', 'rows', 'items', 'members'].forEach(key => {
                     if (Array.isArray(updated[key])) {
                         const origLen = updated[key].length;
-                        const filtered = updated[key].filter(it => !isMemberBlockedOrIgnored(it));
+                        const filtered = updated[key].filter(it => !isMemberBlockedOrIgnored(it) && !isSettingsBlockedSection(it));
                         const diff = origLen - filtered.length;
                         if (diff > 0) {
                             updated[key] = filtered;
@@ -634,7 +684,7 @@
         }
 
         if (Array.isArray(props.data)) {
-            const hasBlocked = props.data.some(it => isMemberBlockedOrIgnored(it));
+            const hasBlocked = props.data.some(it => isMemberBlockedOrIgnored(it) || isSettingsBlockedSection(it));
             if (!hasBlocked) return props;
 
             const rawData = props.data;
@@ -646,6 +696,10 @@
                 const item = rawData[i];
                 if (!item || typeof item !== 'object') {
                     cleanedData.push(item);
+                    continue;
+                }
+
+                if (isSettingsBlockedSection(item)) {
                     continue;
                 }
 
@@ -683,7 +737,7 @@
             if (typeof props.renderItem === 'function') {
                 const origRenderItem = props.renderItem;
                 cloned.renderItem = function(info) {
-                    if (info && (isMemberBlockedOrIgnored(info.item) || isMemberBlockedOrIgnored(info))) {
+                    if (info && (isMemberBlockedOrIgnored(info.item) || isMemberBlockedOrIgnored(info) || isSettingsBlockedSection(info.item) || isSettingsBlockedSection(info))) {
                         return renderEmptyRow();
                     }
                     return origRenderItem.apply(this, arguments);
@@ -723,9 +777,10 @@
         }
     }
 
-    // Strict check if element props indicate a blocked user by ID
+    // Strict check if element props indicate a blocked user by ID or settings row
     function shouldAbsorbElement(props) {
         if (!props || typeof props !== 'object') return false;
+        if (isSettingsBlockedSection(props)) return true;
         if (!props.userId && !props.user && !props.member && !props.author && !props.item && !props.message && !props.record) {
             return false;
         }
@@ -748,20 +803,20 @@
         return false;
     }
 
-    // Recursive child checker: identifies whether a child element or its wrapper represents a blocked user
+    // Recursive child checker: identifies whether a child element or its single-item wrapper represents a blocked user
     function isBlockedElementOrWrapper(child) {
         if (!child || typeof child !== 'object') return false;
         const cp = child.props;
         if (cp && typeof cp === 'object') {
+            if (isSettingsBlockedSection(cp)) return true;
             if (shouldAbsorbElement(cp)) return true;
-            if (cp.children) {
-                if (Array.isArray(cp.children)) {
-                    for (const sub of cp.children) {
-                        if (isBlockedElementOrWrapper(sub)) return true;
-                    }
-                } else if (isBlockedElementOrWrapper(cp.children)) {
-                    return true;
+            if (Array.isArray(cp.children)) {
+                if (cp.children.length === 1) {
+                    return isBlockedElementOrWrapper(cp.children[0]);
                 }
+                return false; // Multi-item container MUST NOT be absorbed!
+            } else if (cp.children && typeof cp.children === 'object') {
+                return isBlockedElementOrWrapper(cp.children);
             }
         }
 
@@ -831,7 +886,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.0.3] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.0.4] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -910,7 +965,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.0.3] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.0.4] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
             // --- 1. FluxDispatcher Gateway & Dispatch Patches ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -1068,41 +1123,8 @@
                                         }
 
                                         if (op.op === 'SYNC' && Array.isArray(op.items)) {
-                                            let itemsModified = false;
-                                            const cleanItems = [];
-
-                                            for (let j = 0; j < op.items.length; j++) {
-                                                const it = op.items[j];
-                                                if (!it || typeof it !== 'object') {
-                                                    cleanItems.push(it);
-                                                    continue;
-                                                }
-
-                                                if (it.group && typeof it.group === 'object') {
-                                                    const bCount = getBlockedCountForSection(it.group.id || it.group.title);
-                                                    if (bCount > 0 && typeof it.group.count === 'number') {
-                                                        itemsModified = true;
-                                                        cleanItems.push({
-                                                            ...it,
-                                                            group: { ...it.group, count: Math.max(0, it.group.count - bCount) }
-                                                        });
-                                                        continue;
-                                                    }
-                                                }
-
-                                                if (it.member && isMemberBlockedOrIgnored(it.member)) {
-                                                    itemsModified = true;
-                                                    continue; // Drop blocked member from SYNC items!
-                                                }
-
-                                                cleanItems.push(it);
-                                            }
-
-                                            if (itemsModified) {
-                                                modified = true;
-                                                cleanOps.push({ ...op, items: cleanItems });
-                                                continue;
-                                            }
+                                            cleanOps.push(op);
+                                            continue;
                                         }
 
                                         if (op.op === 'INSERT' || op.op === 'UPDATE') {
@@ -1203,6 +1225,10 @@
                 if (typeof GuildMemberStore.getMember === 'function') {
                     safePatch('instead', GuildMemberStore, 'getMember', function(args, orig) {
                         const uid = args[1];
+                        try {
+                            const myId = UserStore?.getCurrentUser?.()?.id;
+                            if (myId && String(uid) === String(myId)) return orig ? orig.apply(this, args) : null;
+                        } catch (_) {}
                         if (uid && isBlockedOrIgnored(uid)) return null;
                         return orig ? orig.apply(this, args) : null;
                     });
@@ -1510,9 +1536,37 @@
             patchListComponent(FlashList, false);
             patchListComponent(VirtualizedList, false);
 
-            // --- 4. Direct Member Row Component Hooks ---
+            // --- 4. Settings Form Components Hook ---
             try {
-                const memberRowNames = ['MemberListItem', 'GuildMemberRow', 'ChannelMemberRow', 'MemberRow', 'GuildMemberListItem', 'ChannelMembers'];
+                const settingsTargetMods = new Set();
+                if (_vendetta.ui?.components?.Forms) settingsTargetMods.add(_vendetta.ui.components.Forms);
+                const formKeys = ['TableRow', 'TableRowGroup', 'TableSwitchRow', 'FormRow', 'FormSection'];
+                for (const p of formKeys) {
+                    if (_metro.findByProps) {
+                        try {
+                            const m = _metro.findByProps(p);
+                            if (m && typeof m === 'object') settingsTargetMods.add(m);
+                        } catch (_) {}
+                    }
+                }
+                for (const mod of settingsTargetMods) {
+                    for (const k of formKeys) {
+                        if (typeof mod[k] === 'function') {
+                            safePatch('instead', mod, k, function(args, orig) {
+                                const p = args[0] || {};
+                                if (isSettingsBlockedSection(p)) return renderEmptyRow();
+                                const res = orig ? orig.apply(this, args) : null;
+                                if (res && res.props && isSettingsBlockedSection(res.props)) return renderEmptyRow();
+                                return res;
+                            });
+                        }
+                    }
+                }
+            } catch (_) {}
+
+            // --- 5. Direct Member Row Component Hooks ---
+            try {
+                const memberRowNames = ['MemberListItem', 'GuildMemberRow', 'ChannelMemberRow', 'MemberRow', 'GuildMemberListItem'];
                 for (const name of memberRowNames) {
                     const holder = _metro.findByProps && _metro.findByProps(name);
                     if (holder && typeof holder[name] === 'function') {
@@ -1543,7 +1597,7 @@
                 }
             } catch (_) {}
 
-            // --- 5. Universal React.createElement & JSX Runtime Interceptor ---
+            // --- 6. Universal React.createElement & JSX Runtime Interceptor ---
             function sanitizeElementProps(props) {
                 if (!props || typeof props !== 'object') return props;
                 let newProps = props;
@@ -1708,22 +1762,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.0.3] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.0.4] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.3 Error]', e);
+            console.error('[MasterSuite Mobile v3.0.4 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.3] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.4] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.3] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.4] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.3 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.4 Error stopping]', e);
         }
     }
 
@@ -1731,7 +1785,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.3',
+        version: '3.0.4',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
