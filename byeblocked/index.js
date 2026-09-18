@@ -134,7 +134,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.7 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.8 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -142,7 +142,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.7 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.0.8 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -918,14 +918,36 @@
         return false;
     }
 
-    // Recursive child checker: identifies whether a child element or its single-item wrapper represents a blocked user or empty row
+    // Identifies if a child element is a skeleton, shimmer, or placeholder loading row
+    function isSkeletonOrPlaceholderRow(child) {
+        if (!child || typeof child !== 'object') return false;
+        const name = child.type?.name || child.type?.displayName || (typeof child.type === 'string' ? child.type : '') || '';
+        if (typeof name === 'string' && /skeleton|placeholder|loading|shimmer/i.test(name)) return true;
+        const cp = child.props;
+        if (cp && typeof cp === 'object') {
+            if (cp.isLoading === true || cp.isPlaceholder === true || cp.loading === true || cp.placeholder === true) return true;
+            if (typeof cp.testID === 'string' && /skeleton|placeholder|loading/i.test(cp.testID)) return true;
+            if (typeof cp.accessibilityLabel === 'string' && /loading/i.test(cp.accessibilityLabel)) return true;
+            if (Array.isArray(cp.children)) {
+                if (cp.children.length === 1 && isSkeletonOrPlaceholderRow(cp.children[0])) return true;
+            } else if (cp.children && typeof cp.children === 'object') {
+                if (isSkeletonOrPlaceholderRow(cp.children)) return true;
+            }
+        }
+        if (typeof child.key === 'string' && /skeleton|placeholder|loading/i.test(child.key)) return true;
+        return false;
+    }
+
+    // Recursive child checker: identifies whether a child element or its single-item wrapper represents a blocked user, empty row, or skeleton placeholder
     function isBlockedElementOrWrapper(child) {
         if (!child || typeof child !== 'object') return false;
         if (isEmptyRenderedRow(child)) return true;
+        if (isSkeletonOrPlaceholderRow(child)) return true;
         const cp = child.props;
         if (cp && typeof cp === 'object') {
             if (isSettingsBlockedSection(cp)) return true;
             if (shouldAbsorbElement(cp)) return true;
+            if (isSkeletonOrPlaceholderRow(cp)) return true;
             if (Array.isArray(cp.children)) {
                 if (cp.children.length === 1) {
                     return isBlockedElementOrWrapper(cp.children[0]);
@@ -1002,7 +1024,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.0.7] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.0.8] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -1081,7 +1103,104 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.0.7] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.0.8] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+
+    // Gateway Member List Sanitizer: purges blocked users from Gateway SYNC ops and decrements group counts
+    function sanitizeMemberListUpdate(event) {
+        if (!event || event.type !== 'GUILD_MEMBER_LIST_UPDATE') return event;
+        if (!Array.isArray(event.ops)) return event;
+
+        let modified = false;
+        const newEvent = { ...event };
+        const groupCountDecrements = new Map(); // groupId -> count decremented
+
+        if (Array.isArray(newEvent.ops)) {
+            newEvent.ops = newEvent.ops.map(op => {
+                if (!op || typeof op !== 'object') return op;
+
+                if (op.op === 'SYNC' && Array.isArray(op.items)) {
+                    let currentGroupId = null;
+                    const cleanItems = [];
+                    let opModified = false;
+
+                    for (let i = 0; i < op.items.length; i++) {
+                        const it = op.items[i];
+                        if (!it || typeof it !== 'object') {
+                            cleanItems.push(it);
+                            continue;
+                        }
+
+                        if (it.group && it.group.id) {
+                            currentGroupId = it.group.id;
+                            cleanItems.push(it);
+                            continue;
+                        }
+
+                        if (it.member && isMemberBlockedOrIgnored(it.member)) {
+                            opModified = true;
+                            modified = true;
+                            if (currentGroupId) {
+                                groupCountDecrements.set(currentGroupId, (groupCountDecrements.get(currentGroupId) || 0) + 1);
+                            }
+                            continue; // DROP THE BLOCKED MEMBER ITEM!
+                        }
+
+                        cleanItems.push(it);
+                    }
+
+                    if (opModified) {
+                        // Update group counts inside cleanItems
+                        const updatedItems = cleanItems.map(it => {
+                            if (it && it.group && it.group.id && groupCountDecrements.has(it.group.id)) {
+                                const dec = groupCountDecrements.get(it.group.id);
+                                return {
+                                    ...it,
+                                    group: {
+                                        ...it.group,
+                                        count: Math.max(0, it.group.count - dec)
+                                    }
+                                };
+                            }
+                            return it;
+                        });
+                        return { ...op, items: updatedItems };
+                    }
+                }
+
+                if (op.op === 'INSERT' || op.op === 'UPDATE') {
+                    if (op.item && (isMemberBlockedOrIgnored(op.item) || isMemberBlockedOrIgnored(op.item.member))) {
+                        modified = true;
+                        return null; // Skip this op
+                    }
+                }
+
+                return op;
+            }).filter(Boolean);
+        }
+
+        if (!modified) return event;
+
+        // Update newEvent.groups if present
+        if (Array.isArray(newEvent.groups)) {
+            newEvent.groups = newEvent.groups.map(grp => {
+                if (grp && grp.id && groupCountDecrements.has(grp.id)) {
+                    const dec = groupCountDecrements.get(grp.id);
+                    return {
+                        ...grp,
+                        count: Math.max(0, grp.count - dec)
+                    };
+                }
+                return grp;
+            });
+        }
+
+        // Update online_count if online group was decremented
+        if (groupCountDecrements.has('online') && typeof newEvent.online_count === 'number') {
+            newEvent.online_count = Math.max(0, newEvent.online_count - groupCountDecrements.get('online'));
+        }
+
+        return newEvent;
+    }
 
             // --- 1. FluxDispatcher Gateway & Dispatch Patches ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -1204,9 +1323,13 @@
                                 }
                             }
 
-                            // 9. Gateway Lazy Guild Member List Sync
-                            // Preserved intact: Desktop ByeBlocked & RemoveBlockedUsers do NOT mutate socket events
-                            // to guarantee zero desync in Discord's internal MemberList store!
+                            // 9. Gateway Lazy Guild Member List Sync (GUILD_MEMBER_LIST_UPDATE)
+                            if (event.type === 'GUILD_MEMBER_LIST_UPDATE') {
+                                const sanitized = sanitizeMemberListUpdate(event);
+                                if (sanitized !== event) {
+                                    args[0] = sanitized;
+                                }
+                            }
 
                             // 10. Presence Update Filtering (PRESENCE_UPDATE)
                             if (event.type === 'PRESENCE_UPDATE') {
@@ -1801,22 +1924,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.0.7] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.0.8] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.7 Error]', e);
+            console.error('[MasterSuite Mobile v3.0.8 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.7] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.8] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.7] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.8] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.7 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.8 Error stopping]', e);
         }
     }
 
@@ -1824,7 +1947,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.7',
+        version: '3.0.8',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
