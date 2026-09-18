@@ -1,13 +1,13 @@
 {
-  "name": "DiscordMessageReliability",
-  "description": "1:1 mobile port: Master Message Reliability Suite. Eliminates 'Messages failed to load' errors across Discord servers via transport-layer auto-retry, pre-flight gateway sync, and Flux error auto-recovery.",
-  "authors": [
-    {
-      "name": "Antigravity",
-      "id": "698947564459917343"
-    }
-  ],
-  "main": "index.js",
-  "version": "3.0.3",
-  "hash": "ab16921a894c9b8ae7d033f82b3db89bf195c472c6fcb944616f6a165b8b929f"
+    "name": "DiscordMessageReliability",
+    "description": "1:1 mobile port: Master Message Reliability Suite. Eliminates 'Messages failed to load' errors across Discord servers via transport-layer auto-retry, pre-flight gateway sync, and Flux error auto-recovery.",
+    "authors": [
+        {
+            "name": "Antigravity",
+            "id": "698947564459917343"
+        }
+    ],
+    "main": "index.js",
+    "version": "3.2.0",
+    "hash": "588758caa0dc80df318b63273e243bc20f52d4d1a074cb8a37128ed8c6f8bc15"
 }
