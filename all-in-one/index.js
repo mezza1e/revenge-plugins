@@ -134,7 +134,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.5 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.6 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -142,7 +142,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.5 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.0.6 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -245,6 +245,13 @@
             const myId = getCurrentUserId();
             if (myId && s === myId) return false;
         } catch (_) {}
+        if (RelationshipStore) {
+            try {
+                if (typeof RelationshipStore.isFriend === 'function' && RelationshipStore.isFriend(s)) return false;
+                const rel = typeof RelationshipStore.getRelationshipType === 'function' ? RelationshipStore.getRelationshipType(s) : null;
+                if (rel === 1) return false; // Relationship 1 = FRIEND (never blocked)
+            } catch (_) {}
+        }
         if (blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s)) return true;
 
         if (rawIsBlocked && RelationshipStore) {
@@ -273,7 +280,8 @@
         if (!item || typeof item !== 'object') return false;
         try {
             const myId = getCurrentUserId();
-            const uid = item.userId || item.id || item.user?.id || item.member?.userId || item.member?.user?.id;
+            const uid = item.userId || item.user?.id || item.member?.userId || item.member?.user?.id ||
+                        (typeof item.id === 'string' && /^\d{17,20}$/.test(item.id) ? item.id : (typeof item.id === 'string' ? item.id.match(/\d{17,20}/)?.[0] : null));
             if (myId && uid && String(uid) === myId) return false;
         } catch (_) {}
 
@@ -284,7 +292,6 @@
         }
 
         const uid = item.userId ||
-                    item.id ||
                     item.user?.id ||
                     item.member?.userId ||
                     item.member?.user?.id ||
@@ -292,7 +299,8 @@
                     item.author?.id ||
                     item.record?.userId ||
                     item.record?.id ||
-                    item.record?.user?.id;
+                    item.record?.user?.id ||
+                    (typeof item.id === 'string' && /^\d{17,20}$/.test(item.id) ? item.id : (typeof item.id === 'string' ? item.id.match(/\d{17,20}/)?.[0] : null));
 
         if (uid) {
             return isBlockedOrIgnored(uid);
@@ -547,105 +555,127 @@
         return pruneOrphanedDateDividers(temp);
     }
 
-    // --- 1:1 DESKTOP PARITY MEMBER LIST SANITIZATION ---
-    // Recalculates exact row indices, decrements counts, and preserves all leading non-group rows (Invite, Banners, Feeds)!
+    // --- 1:1 DESKTOP PARITY MEMBER LIST SANITIZATION (Exact RemoveBlockedUsers Desktop Algorithm) ---
     function sanitizeDesktopStyleChannelMembers(props) {
         if (!props || typeof props !== 'object') return props;
         if (!Array.isArray(props.rows) || !Array.isArray(props.groups)) return props;
 
-        const newGroups = props.groups.map(g => ({ ...g }));
-        const newRows = [];
         let hiddenRows = false;
-
-        let currentGroup = null;
-        let currentGroupVisibleCount = 0;
-        const groupMap = new Map();
-        newGroups.forEach(g => { if (g.id) groupMap.set(g.id, g); });
+        const newGroups = props.groups.map(g => (g && typeof g === 'object') ? { ...g } : g);
+        const newRows = new Array(props.rows.length);
 
         for (let i = 0; i < props.rows.length; i++) {
-            const rawRow = props.rows[i];
-            if (!rawRow || typeof rawRow !== 'object') continue;
-            const row = { ...rawRow };
-
-            const isGroupRow = row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true ||
-                               (typeof row.id === 'string' && groupMap.has(row.id));
-
-            if (isGroupRow) {
-                if (currentGroup) {
-                    currentGroup.count = currentGroupVisibleCount;
-                    if (typeof currentGroup.title === 'string') {
-                        currentGroup.title = currentGroup.title.replace(/(\d+)(?=[^\d]*$)/, String(currentGroupVisibleCount));
-                    }
-                }
-                currentGroup = row;
-                currentGroupVisibleCount = 0;
-                newRows.push(row);
+            const row = props.rows[i];
+            // 1. Preserve non-member rows and lazy null placeholders
+            if (!row || typeof row !== 'object') {
+                newRows[i] = row;
                 continue;
             }
 
-            if (isMemberBlockedOrIgnored(row)) {
-                hiddenRows = true;
-                continue; // Omit blocked member row
+            const isGroup = row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true;
+            const isMember = row.type === 'MEMBER' || row.rowType === 'MEMBER' || (!isGroup && (row.user || row.member || row.userId));
+
+            if (!isMember) {
+                newRows[i] = row;
+                continue;
             }
 
-            // Only count member rows that belong to a group header
-            if (currentGroup) {
-                currentGroupVisibleCount++;
+            // 2. Check if this member is blocked or ignored
+            if (!isMemberBlockedOrIgnored(row)) {
+                newRows[i] = row;
+                continue;
             }
-            newRows.push(row);
-        }
 
-        if (currentGroup) {
-            currentGroup.count = currentGroupVisibleCount;
-            if (typeof currentGroup.title === 'string') {
-                currentGroup.title = currentGroup.title.replace(/(\d+)(?=[^\d]*$)/, String(currentGroupVisibleCount));
-            }
-        }
+            // 3. Member IS blocked - hide it and decrement its group count
+            hiddenRows = true;
+            newRows[i] = undefined; // Mark row for removal
 
-        if (hiddenRows) {
-            for (const row of newRows) {
-                if (row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true || (typeof row.id === 'string' && groupMap.has(row.id))) {
-                    const grp = groupMap.get(row.id);
-                    if (grp) {
-                        grp.count = row.count;
-                        grp.title = row.title;
+            let found = false;
+            let rowIndex = i - 1;
+            while (!found && rowIndex > -1) {
+                const prev = newRows[rowIndex];
+                if (prev && typeof prev === 'object' && (prev.type === 'GROUP' || prev.rowType === 'GROUP' || prev.header === true)) {
+                    found = true;
+                    const groupIndex = newGroups.findIndex(g => g && g.id === prev.id);
+                    if (groupIndex > -1 && typeof newGroups[groupIndex].count === 'number') {
+                        newGroups[groupIndex].count = Math.max(0, newGroups[groupIndex].count - 1);
+                        if (typeof newGroups[groupIndex].title === 'string') {
+                            newGroups[groupIndex].title = newGroups[groupIndex].title.replace(/(\d+)(?=[^\d]*$)/, String(newGroups[groupIndex].count));
+                        }
+                        prev.count = newGroups[groupIndex].count;
+                        prev.title = newGroups[groupIndex].title;
                     }
+                } else {
+                    rowIndex--;
                 }
             }
-
-            const finalGroups = newGroups.filter(g => g && (g.count > 0 || g.id === 'content-inventory-feed'));
-            const validGroupIds = new Set(finalGroups.map(g => g.id));
-
-            const finalRows = newRows.filter(r => {
-                const isGroup = r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true || (typeof r.id === 'string' && groupMap.has(r.id));
-                if (isGroup) {
-                    return validGroupIds.has(r.id);
-                }
-                return true;
-            });
-
-            // EXACT ROW INDEX FINDING:
-            // Locate the exact position of each group header in finalRows!
-            // This guarantees 100% alignment even when 'Invite Members', banners, or feeds precede the group headers!
-            for (let i = 0; i < finalGroups.length; i++) {
-                const grp = finalGroups[i];
-                let actualIdx = finalRows.findIndex(r => r && (r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true) && r.id === grp.id);
-                if (actualIdx === -1) {
-                    actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
-                }
-                if (actualIdx !== -1) {
-                    grp.index = actualIdx;
-                }
-            }
-
-            return {
-                ...props,
-                rows: finalRows,
-                groups: finalGroups
-            };
         }
 
-        return props;
+        // If no rows were hidden, return props completely untouched!
+        if (!hiddenRows) return props;
+
+        // Recalculate group indices with Invite Members offset preservation
+        let leadingOffset = 0;
+        for (let i = 0; i < newRows.length; i++) {
+            const r = newRows[i];
+            if (r && typeof r === 'object' && (r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true)) {
+                break;
+            }
+            if (r !== undefined) leadingOffset++;
+        }
+
+        let indexSum = leadingOffset;
+        for (let i = 0; i < newGroups.length; i++) {
+            const grp = newGroups[i];
+            if (grp && grp.id !== 'content-inventory-feed') {
+                grp.index = indexSum;
+                if (typeof grp.count === 'number' && grp.count > 0) {
+                    indexSum += (grp.count + 1);
+                }
+            }
+        }
+
+        // Mark empty groups as undefined in rows
+        for (let i = 0; i < newRows.length; i++) {
+            const r = newRows[i];
+            if (r && typeof r === 'object' && (r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true) && r.count <= 0) {
+                newRows[i] = undefined;
+            }
+        }
+
+        // removeEmptyWithin: removes undefined holes while preserving unloaded suffix placeholders
+        const removeEmptyWithin = (array, filter) => {
+            let reversed = [].concat(array).reverse();
+            let suffixLength = 0;
+            for (let i = 0; i < reversed.length; i++) {
+                if (reversed[i] !== undefined) {
+                    suffixLength = i;
+                    break;
+                }
+            }
+            return [].concat(array.filter(filter), new Array(suffixLength));
+        };
+
+        const finalRows = removeEmptyWithin(newRows, n => n !== undefined);
+
+        if (newGroups[0] && newGroups[0].id === 'content-inventory-feed') {
+            newGroups[0].index = finalRows.length - (newGroups[0].count + 1);
+        }
+        const finalGroups = removeEmptyWithin(newGroups, g => g && g.count > 0);
+
+        // Dynamic index alignment for each remaining group
+        for (let i = 0; i < finalGroups.length; i++) {
+            const grp = finalGroups[i];
+            let actualIdx = finalRows.findIndex(r => r && (r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true) && r.id === grp.id);
+            if (actualIdx === -1) actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
+            if (actualIdx !== -1) grp.index = actualIdx;
+        }
+
+        return {
+            ...props,
+            rows: finalRows,
+            groups: finalGroups
+        };
     }
 
     // Helper to safely clone and filter SectionList props with accurate header counts
@@ -918,7 +948,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.0.5] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.0.6] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -997,7 +1027,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.0.5] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.0.6] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
             // --- 1. FluxDispatcher Gateway & Dispatch Patches ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -1120,61 +1150,9 @@
                                 }
                             }
 
-                            // 9. Gateway Lazy Guild Member List Filtering (GUILD_MEMBER_LIST_UPDATE)
-                            if (event.type === 'GUILD_MEMBER_LIST_UPDATE') {
-                                let modified = false;
-                                const newEvent = { ...event };
-
-                                if (Array.isArray(newEvent.groups)) {
-                                    newEvent.groups = newEvent.groups.map(grp => {
-                                        if (!grp || typeof grp !== 'object') return grp;
-                                        const blockedCount = getBlockedCountForSection(grp.id || grp.title);
-                                        if (blockedCount > 0 && typeof grp.count === 'number') {
-                                            modified = true;
-                                            return { ...grp, count: Math.max(0, grp.count - blockedCount) };
-                                        }
-                                        return grp;
-                                    });
-                                }
-
-                                if (typeof newEvent.online_count === 'number' && blockedUserIdsSet.size > 0) {
-                                    const onlineBlocked = getBlockedCountForSection('online');
-                                    if (onlineBlocked > 0) {
-                                        newEvent.online_count = Math.max(0, newEvent.online_count - onlineBlocked);
-                                        modified = true;
-                                    }
-                                }
-
-                                if (Array.isArray(newEvent.ops)) {
-                                    const cleanOps = [];
-                                    for (let i = 0; i < newEvent.ops.length; i++) {
-                                        const op = newEvent.ops[i];
-                                        if (!op || typeof op !== 'object') {
-                                            cleanOps.push(op);
-                                            continue;
-                                        }
-
-                                        if (op.op === 'SYNC' && Array.isArray(op.items)) {
-                                            cleanOps.push(op);
-                                            continue;
-                                        }
-
-                                        if (op.op === 'INSERT' || op.op === 'UPDATE') {
-                                            if (op.item && (isMemberBlockedOrIgnored(op.item) || isMemberBlockedOrIgnored(op.item.member))) {
-                                                modified = true;
-                                                continue;
-                                            }
-                                        }
-
-                                        cleanOps.push(op);
-                                    }
-                                    if (modified) newEvent.ops = cleanOps;
-                                }
-
-                                if (modified) {
-                                    args[0] = newEvent;
-                                }
-                            }
+                            // 9. Gateway Lazy Guild Member List Sync
+                            // Preserved intact: Desktop ByeBlocked & RemoveBlockedUsers do NOT mutate socket events
+                            // to guarantee zero desync in Discord's internal MemberList store!
 
                             // 10. Presence Update Filtering (PRESENCE_UPDATE)
                             if (event.type === 'PRESENCE_UPDATE') {
@@ -1256,10 +1234,17 @@
             if (GuildMemberStore) {
                 if (typeof GuildMemberStore.getMember === 'function') {
                     safePatch('instead', GuildMemberStore, 'getMember', function(args, orig) {
+                        const guildId = args[0];
                         const uid = args[1];
                         try {
-                            const myId = UserStore?.getCurrentUser?.()?.id;
-                            if (myId && String(uid) === String(myId)) return orig ? orig.apply(this, args) : null;
+                            const myId = getCurrentUserId();
+                            if (myId && String(uid) === myId) return orig ? orig.apply(this, args) : null;
+                            if (GuildStore && guildId) {
+                                const g = typeof GuildStore.getGuild === 'function' ? GuildStore.getGuild(guildId) : null;
+                                if (g && (String(uid) === String(g.ownerId) || String(uid) === String(g.owner_id))) {
+                                    return orig ? orig.apply(this, args) : null;
+                                }
+                            }
                         } catch (_) {}
                         if (uid && isBlockedOrIgnored(uid)) return null;
                         return orig ? orig.apply(this, args) : null;
@@ -1680,39 +1665,7 @@
                     }
                 }
 
-                // 3. Sanitize Header Text (e.g. "Online — 2" -> "Online — 1")
-                if (typeof newProps.children === 'string') {
-                    const text = newProps.children;
-                    const match = text.match(/^([A-Za-z0-9_\s]+)\s*[—–-]\s*(\d+)/i);
-                    if (match) {
-                        const sectionType = match[1];
-                        const count = parseInt(match[2], 10);
-                        const blockedCount = getBlockedCountForSection(sectionType);
-                        if (blockedCount > 0) {
-                            const newCount = Math.max(0, count - blockedCount);
-                            newProps = {
-                                ...newProps,
-                                children: text.replace(/(\d+)(?=[^\d]*$)/, String(newCount))
-                            };
-                        }
-                    }
-                } else if (Array.isArray(newProps.children) && newProps.children.length >= 2) {
-                    const firstStr = String(newProps.children[0] || '');
-                    if (/([A-Za-z0-9_\s]+)\s*[—–-]/i.test(firstStr)) {
-                        const blockedCount = getBlockedCountForSection(firstStr);
-                        if (blockedCount > 0) {
-                            const clonedChildren = [...newProps.children];
-                            const lastIdx = clonedChildren.length - 1;
-                            if (typeof clonedChildren[lastIdx] === 'number') {
-                                clonedChildren[lastIdx] = Math.max(0, clonedChildren[lastIdx] - blockedCount);
-                                newProps = { ...newProps, children: clonedChildren };
-                            } else if (typeof clonedChildren[lastIdx] === 'string' && /\d+/.test(clonedChildren[lastIdx])) {
-                                clonedChildren[lastIdx] = clonedChildren[lastIdx].replace(/(\d+)/, m => String(Math.max(0, parseInt(m, 10) - blockedCount)));
-                                newProps = { ...newProps, children: clonedChildren };
-                            }
-                        }
-                    }
-                }
+                // 3. Header text counts are already accurately handled by group.title in sanitizeDesktopStyleChannelMembers
 
                 // 4. Sanitize sections array
                 if (Array.isArray(newProps.sections)) {
@@ -1794,22 +1747,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.0.5] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.0.6] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.5 Error]', e);
+            console.error('[MasterSuite Mobile v3.0.6 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.5] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.6] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.5] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.6] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.5 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.6 Error stopping]', e);
         }
     }
 
@@ -1817,7 +1770,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.5',
+        version: '3.0.6',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
