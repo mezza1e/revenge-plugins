@@ -22,15 +22,7 @@
                    {};
     const unpatches = [];
 
-    // Ambient safety shims: ensure uuid4 and toasts don't throw in Revengecord's installer
-    try {
-        if (_metro && typeof _metro.findByProps === 'function') {
-            const uuidMod = _metro.findByProps('uuid4');
-            if (uuidMod && typeof uuidMod.uuid4 !== 'function') {
-                uuidMod.uuid4 = () => 'vd-' + Math.random().toString(36).substring(2, 10);
-            }
-        }
-    } catch (_) {}
+    // Ambient safety shims moved inside startPlugin()
 
     // Lazily resolved inside startPlugin() only!
     let _FluxDispatcher = null;
@@ -120,7 +112,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.2 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.3 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -128,7 +120,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.2 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.0.3 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -423,7 +415,7 @@
     function isMessageRow(r) {
         if (!r || typeof r !== 'object') return false;
         if (isDividerRow(r)) return false;
-        if (r.type === 2 || r.rowType === 2 || r.type === -1 || r.hidden === true) return false;
+        if (r.type === 2 || r.rowType === 2  || r.hidden === true) return false;
         if (r.message && (isBlockedOrIgnored(r.message.author?.id) || blockedMessageIdsSet.has(String(r.message.id)))) return false;
         if (r.item && (isBlockedOrIgnored(r.item.author?.id) || blockedMessageIdsSet.has(String(r.item.id)))) return false;
         return !!(r.message || r.item || r.author || r.content || r.type === 0 || r.type === 'MESSAGE');
@@ -493,7 +485,7 @@
             const row = rows[i];
             if (!row || typeof row !== 'object' || row.type == null) continue;
             // Drop blocked group (type 2) or message from blocked user
-            if (row.type === 2 || row.rowType === 2 || row.type === -1 || row.hidden === true) continue;
+            if (row.type === 2 || row.rowType === 2  || row.hidden === true) continue;
             if (row.message && (isBlockedOrIgnored(row.message.author?.id) || blockedMessageIdsSet.has(String(row.message.id)))) continue;
             if (row.item && (isBlockedOrIgnored(row.item.author?.id) || blockedMessageIdsSet.has(String(row.item.id)))) continue;
 
@@ -831,7 +823,15 @@
 
     function startPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.0] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            if (_metro && typeof _metro.findByProps === 'function') {
+                const uuidMod = _metro.findByProps('uuid4');
+                if (uuidMod && typeof uuidMod.uuid4 !== 'function') {
+                    uuidMod.uuid4 = () => 'vd-' + Math.random().toString(36).substring(2, 10);
+                }
+            }
+        } catch (_) {}
+        try {
+            console.log('[MasterSuite Mobile v3.0.3] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -910,7 +910,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.0.0] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.0.3] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
             // --- 1. FluxDispatcher Gateway & Dispatch Patches ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -1292,8 +1292,7 @@
                     // Neutralize blocked message completely: eliminate content, timestamps, and dates
                     if (data.message) {
                         if (isBlockedOrIgnored(data.message.author?.id) || blockedMessageIdsSet.has(String(data.message.id))) {
-                            data.type = -1;
-                            data.rowType = -1;
+                            // Retain valid native type enum
                             data.hidden = true;
                             data.renderContentOnly = true;
                             data.message.content = '';
@@ -1309,8 +1308,7 @@
 
                     // Neutralize blocked group row (type 2)
                     if (data.rowType === 2 || data.type === 2) {
-                        data.type = -1;
-                        data.rowType = -1;
+                        // Retain valid native type enum
                         data.hidden = true;
                         data.renderContentOnly = true;
                         data.roleStyle = '';
@@ -1340,8 +1338,7 @@
                     if (!res) return res;
                     if (res.message) {
                         if (isBlockedOrIgnored(res.message.author?.id) || blockedMessageIdsSet.has(String(res.message.id))) {
-                            res.type = -1;
-                            res.rowType = -1;
+                            // Retain valid native type enum
                             res.hidden = true;
                             res.renderContentOnly = true;
                             res.text = '';
@@ -1361,8 +1358,7 @@
                         }
                     }
                     if (res.rowType === 2 || res.type === 2) {
-                        res.type = -1;
-                        res.rowType = -1;
+                        // Retain valid native type enum
                         res.hidden = true;
                         res.renderContentOnly = true;
                         res.roleStyle = '';
@@ -1403,7 +1399,7 @@
                     if (typeof mod.createRow === 'function') {
                         safePatch('instead', mod, 'createRow', function(args, orig) {
                             const row = args[0];
-                            if (!row || typeof row !== 'object' || row.type == null || row.type === -1 || row.hidden === true) {
+                            if (!row || typeof row !== 'object' || row.type == null  || row.hidden === true) {
                                 return null;
                             }
                             return orig ? orig.apply(this, args) : null;
@@ -1712,22 +1708,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.0.0] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.0.3] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.0 Error]', e);
+            console.error('[MasterSuite Mobile v3.0.3 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.2] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.3] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.2] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.3] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.2 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.3 Error stopping]', e);
         }
     }
 
@@ -1735,7 +1731,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.2',
+        version: '3.0.3',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
