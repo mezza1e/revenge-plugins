@@ -22,6 +22,28 @@
                    {};
     const unpatches = [];
 
+    // Bulletproof current user ID resolver across all Discord mobile store variations
+    function getCurrentUserId() {
+        try {
+            if (UserStore && typeof UserStore.getCurrentUser === 'function') {
+                const u = UserStore.getCurrentUser();
+                if (u && u.id) return String(u.id);
+            }
+            if (_common && _common.UserStore && typeof _common.UserStore.getCurrentUser === 'function') {
+                const u = _common.UserStore.getCurrentUser();
+                if (u && u.id) return String(u.id);
+            }
+            if (_metro && typeof _metro.findByProps === 'function') {
+                const auth = _metro.findByProps('getId');
+                if (auth && typeof auth.getId === 'function') {
+                    const id = auth.getId();
+                    if (id) return String(id);
+                }
+            }
+        } catch (_) {}
+        return null;
+    }
+
     // Ambient safety shims moved inside startPlugin()
 
     // Lazily resolved inside startPlugin() only!
@@ -112,7 +134,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.4 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.5 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -120,7 +142,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.4 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.0.5 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -220,8 +242,8 @@
         if (!userId) return false;
         const s = String(userId);
         try {
-            const myId = UserStore?.getCurrentUser?.()?.id;
-            if (myId && s === String(myId)) return false;
+            const myId = getCurrentUserId();
+            if (myId && s === myId) return false;
         } catch (_) {}
         if (blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s)) return true;
 
@@ -250,9 +272,9 @@
     function isMemberBlockedOrIgnored(item) {
         if (!item || typeof item !== 'object') return false;
         try {
-            const myId = UserStore?.getCurrentUser?.()?.id;
+            const myId = getCurrentUserId();
             const uid = item.userId || item.id || item.user?.id || item.member?.userId || item.member?.user?.id;
-            if (myId && uid && String(uid) === String(myId)) return false;
+            if (myId && uid && String(uid) === myId) return false;
         } catch (_) {}
 
         // Guard against pure Channel or Guild navigation items that have no user/member data
@@ -526,7 +548,7 @@
     }
 
     // --- 1:1 DESKTOP PARITY MEMBER LIST SANITIZATION ---
-    // Recalculates group.index offsets, decrements counts, and eliminates dead virtualization slots!
+    // Recalculates exact row indices, decrements counts, and preserves all leading non-group rows (Invite, Banners, Feeds)!
     function sanitizeDesktopStyleChannelMembers(props) {
         if (!props || typeof props !== 'object') return props;
         if (!Array.isArray(props.rows) || !Array.isArray(props.groups)) return props;
@@ -541,8 +563,9 @@
         newGroups.forEach(g => { if (g.id) groupMap.set(g.id, g); });
 
         for (let i = 0; i < props.rows.length; i++) {
-            const row = props.rows[i];
-            if (!row || typeof row !== 'object') continue;
+            const rawRow = props.rows[i];
+            if (!rawRow || typeof rawRow !== 'object') continue;
+            const row = { ...rawRow };
 
             const isGroupRow = row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true ||
                                (typeof row.id === 'string' && groupMap.has(row.id));
@@ -565,7 +588,10 @@
                 continue; // Omit blocked member row
             }
 
-            currentGroupVisibleCount++;
+            // Only count member rows that belong to a group header
+            if (currentGroup) {
+                currentGroupVisibleCount++;
+            }
             newRows.push(row);
         }
 
@@ -598,11 +624,17 @@
                 return true;
             });
 
-            let indexSum = 0;
+            // EXACT ROW INDEX FINDING:
+            // Locate the exact position of each group header in finalRows!
+            // This guarantees 100% alignment even when 'Invite Members', banners, or feeds precede the group headers!
             for (let i = 0; i < finalGroups.length; i++) {
-                if (finalGroups[i].id !== 'content-inventory-feed') {
-                    finalGroups[i].index = indexSum;
-                    indexSum += (finalGroups[i].count + 1);
+                const grp = finalGroups[i];
+                let actualIdx = finalRows.findIndex(r => r && (r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true) && r.id === grp.id);
+                if (actualIdx === -1) {
+                    actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
+                }
+                if (actualIdx !== -1) {
+                    grp.index = actualIdx;
                 }
             }
 
@@ -886,7 +918,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.0.4] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.0.5] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -965,7 +997,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.0.4] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.0.5] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
             // --- 1. FluxDispatcher Gateway & Dispatch Patches ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -1762,22 +1794,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.0.4] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.0.5] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.4 Error]', e);
+            console.error('[MasterSuite Mobile v3.0.5 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.4] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.5] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.4] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.5] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.4 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.5 Error stopping]', e);
         }
     }
 
@@ -1785,7 +1817,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.4',
+        version: '3.0.5',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
