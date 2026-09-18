@@ -13,35 +13,17 @@
     const unpatches = [];
 
     
-    let recentChannels = [];
-    const MAX_CHANNELS = 4;
-
     function onLoad() {
         try {
-            console.log('[DiscordMemoryEngine Mobile] Initializing...');
+            console.log('[DiscordMemoryEngine Mobile] Initializing (Unlimited Channel Cache Mode)...');
             if (!_patcher || !_patcher.before) return;
-            const MessageStore = _metro.findByStoreName ? _metro.findByStoreName('MessageStore') : null;
 
             if (_FluxDispatcher) {
                 unpatches.push(
                     _patcher.after('dispatch', _FluxDispatcher, ([event]) => {
                         if (!event) return;
-                        if (event.type === 'CHANNEL_SELECT' && event.channelId) {
-                            recentChannels = recentChannels.filter(id => id !== event.channelId);
-                            recentChannels.unshift(event.channelId);
-                            if (recentChannels.length > MAX_CHANNELS) {
-                                recentChannels = recentChannels.slice(0, MAX_CHANNELS);
-                                if (MessageStore) {
-                                    const cache = MessageStore._channelMessages || MessageStore._messages;
-                                    if (cache && typeof cache === 'object') {
-                                        const allowed = new Set(recentChannels);
-                                        for (const chId in cache) {
-                                            if (!allowed.has(chId)) delete cache[chId];
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        // Unlimited channel cache: zero eviction for instantaneous channel switching.
+                        // Performs background GC only when mobile app is minimized.
                         if (event.type === 'APP_STATE_UPDATE' && event.state === 'background') {
                             if (typeof global !== 'undefined' && typeof global.gc === 'function') global.gc();
                         }
