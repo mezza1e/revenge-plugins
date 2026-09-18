@@ -1,7 +1,7 @@
 /**
  * @name Revengecord Plugin Suite
- * @description Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored with 1:1 Desktop Parity. All memory engines, media prefetchers, and reliability pre-warmers abolished.
- * @version 4.0.0
+ * @description Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored with 1:1 Desktop Parity. Completely eliminates blocked & ignored accounts from Content & Social settings, chat, member lists, and voice channels.
+ * @version 4.1.0
  * @author Antigravity (Parity with DevilBro & nicola02nb)
  */
 (function(vendettaArg) {
@@ -112,7 +112,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'Revengecord Plugin Suite v4.0.0: ACTIVE'
+                    content: 'Revengecord Plugin Suite v4.1.0: ACTIVE'
                 });
                 return;
             }
@@ -120,7 +120,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Revengecord Plugin Suite v4.0.0: ACTIVE');
+                showToast('Revengecord Plugin Suite v4.1.0: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -233,31 +233,77 @@
         return false;
     }
 
+    // Normalization handles ASCII and curly typographical apostrophes (' vs ’)
+    function normalizeSettingsText(str) {
+        if (typeof str !== 'string') return '';
+        return str
+            .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
+            .trim()
+            .toLowerCase();
+    }
+
+    function isSettingsBlockedString(str) {
+        if (typeof str !== 'string') return false;
+        const s = normalizeSettingsText(str);
+        if (!s) return false;
+
+        return s.includes("accounts you've blocked or ignored") ||
+               s.includes("accounts you've blocked") ||
+               s.includes("blocked or ignored") ||
+               s.includes("blocked accounts") ||
+               s.includes("ignored accounts") ||
+               s.includes("blocked users") ||
+               s.includes("ignored users") ||
+               s.includes("you're in control") ||
+               s.includes("reducing unwanted interactions") ||
+               s.includes("explore our feature guide") ||
+               s.includes("feature guide") ||
+               s === "blocked" ||
+               s === "ignored";
+    }
+
     function isSettingsBlockedSection(val, depth = 0) {
-        if (!val || depth > 5) return false;
+        if (!val || depth > 6) return false;
+
+        // 1. Plain string
         if (typeof val === 'string') {
-            const lower = val.trim().toLowerCase();
-            return lower.includes("accounts you've blocked or ignored") ||
-                   lower.includes("accounts you've blocked") ||
-                   lower.includes("blocked or ignored") ||
-                   lower.startsWith("blocked accounts") ||
-                   lower.startsWith("ignored accounts") ||
-                   lower === "blocked users" ||
-                   lower === "ignored users" ||
-                   (lower === "blocked" && depth > 0);
+            return isSettingsBlockedString(val);
         }
-        if (typeof val === 'object') {
-            for (const k of ['label', 'text', 'title', 'header', 'subLabel', 'description', 'accessibilityLabel', 'aria-label']) {
-                if (val[k] && isSettingsBlockedSection(val[k], depth + 1)) return true;
+
+        // 2. Array of items / children
+        if (Array.isArray(val)) {
+            const combined = val
+                .filter(c => typeof c === 'string')
+                .join(' ');
+            if (combined && isSettingsBlockedString(combined)) return true;
+
+            for (let i = 0; i < val.length; i++) {
+                if (isSettingsBlockedSection(val[i], depth + 1)) return true;
             }
-            if (val.props && isSettingsBlockedSection(val.props, depth + 1)) return true;
-            if (typeof val.children === 'string' && isSettingsBlockedSection(val.children, depth + 1)) return true;
-            if (Array.isArray(val.children)) {
-                for (const c of val.children) {
-                    if (typeof c === 'string' && isSettingsBlockedSection(c, depth + 1)) return true;
+            return false;
+        }
+
+        // 3. Object / React Element / Props
+        if (typeof val === 'object') {
+            const checkKeys = [
+                'label', 'title', 'header', 'subLabel', 'text', 'description',
+                'accessibilityLabel', 'aria-label', 'footer', 'helpText',
+                'trailingText', 'leadingText', 'detail', 'value', 'subTitle',
+                'hint', 'note', 'body', 'content', 'sectionTitle', 'titleText',
+                'name', 'children'
+            ];
+
+            for (const k of checkKeys) {
+                if (val[k] != null && isSettingsBlockedSection(val[k], depth + 1)) {
+                    return true;
                 }
             }
+
+            if (val.props && typeof val.props === 'object') {
+                if (isSettingsBlockedSection(val.props, depth + 1)) return true;
+            }
         }
+
         return false;
     }
 
@@ -279,7 +325,7 @@
         if (React && typeof React.createElement === 'function' && View) {
             try {
                 return React.createElement(View, {
-                    style: { height: 0, width: 0, opacity: 0, overflow: 'hidden' },
+                    style: { display: 'none', height: 0, width: 0, opacity: 0, overflow: 'hidden' },
                     pointerEvents: 'none'
                 });
             } catch (_) {}
@@ -356,12 +402,16 @@
             const row = rows[i];
             if (!row || typeof row !== 'object' || row.type == null) continue;
             if (row.type === 2 || row.rowType === 2 || row.hidden === true) continue;
-            if (row.message && (isBlockedOrIgnored(row.message.author?.id) || blockedMessageIdsSet.has(String(row.message.id)))) continue;
-            if (row.item && (isBlockedOrIgnored(row.item.author?.id) || blockedMessageIdsSet.has(String(row.item.id)))) continue;
-
-            if (row.message) sanitizeMessage(row.message);
-            if (row.item) sanitizeMessage(row.item);
-            if (row.reply) delete row.reply;
+            if (row.message) {
+                const authorId = row.message.author?.id || row.author?.id;
+                if (isBlockedOrIgnored(authorId) || blockedMessageIdsSet.has(String(row.message.id))) continue;
+                sanitizeMessage(row.message);
+            }
+            if (row.item) {
+                const authorId = row.item.author?.id;
+                if (isBlockedOrIgnored(authorId) || blockedMessageIdsSet.has(String(row.item.id))) continue;
+                sanitizeMessage(row.item);
+            }
             temp.push(row);
         }
         return pruneOrphanedDateDividers(temp);
@@ -369,123 +419,27 @@
 
     function sanitizeDesktopStyleChannelMembers(props) {
         if (!props || typeof props !== 'object') return props;
-        if (!Array.isArray(props.rows) || !Array.isArray(props.groups)) return props;
+        try {
+            const cloned = { ...props };
+            let hasFiltered = false;
 
-        let hiddenRows = false;
-        const newGroups = props.groups.map(g => (g && typeof g === 'object') ? { ...g } : g);
-        const newRows = new Array(props.rows.length);
-
-        const groupMap = new Map();
-        newGroups.forEach(g => { if (g && g.id) groupMap.set(g.id, g); });
-
-        const isGroupRow = row => {
-            if (!row || typeof row !== 'object') return false;
-            return row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true ||
-                   (typeof row.id === 'string' && groupMap.has(row.id));
-        };
-
-        const isMemberRow = row => {
-            if (!row || typeof row !== 'object') return false;
-            if (isGroupRow(row)) return false;
-            return row.type === 'MEMBER' || row.rowType === 'MEMBER' || !!(row.user || row.member || row.userId || row.nick);
-        };
-
-        for (let i = 0; i < props.rows.length; i++) {
-            const row = props.rows[i];
-            if (!row || typeof row !== 'object') {
-                newRows[i] = row;
-                continue;
-            }
-            if (!isMemberRow(row)) {
-                newRows[i] = row;
-                continue;
-            }
-            if (!isMemberBlockedOrIgnored(row)) {
-                newRows[i] = row;
-                continue;
+            if (Array.isArray(cloned.rows)) {
+                const origLen = cloned.rows.length;
+                cloned.rows = cloned.rows.filter(r => !isMemberBlockedOrIgnored(r));
+                if (cloned.rows.length !== origLen) hasFiltered = true;
             }
 
-            hiddenRows = true;
-            newRows[i] = undefined;
-
-            let found = false;
-            let rowIndex = i - 1;
-            while (!found && rowIndex > -1) {
-                const prev = newRows[rowIndex];
-                if (prev && isGroupRow(prev)) {
-                    found = true;
-                    const groupIndex = newGroups.findIndex(g => g && g.id === prev.id);
-                    if (groupIndex > -1 && typeof newGroups[groupIndex].count === 'number') {
-                        newGroups[groupIndex].count = Math.max(0, newGroups[groupIndex].count - 1);
-                        if (typeof newGroups[groupIndex].title === 'string') {
-                            newGroups[groupIndex].title = newGroups[groupIndex].title.replace(/(\d+)(?=[^\d]*$)/, String(newGroups[groupIndex].count));
-                        }
-                        prev.count = newGroups[groupIndex].count;
-                        prev.title = newGroups[groupIndex].title;
-                    }
-                } else {
-                    rowIndex--;
+            if (Array.isArray(cloned.groups)) {
+                const blockedCount = props.rows ? props.rows.length - (cloned.rows ? cloned.rows.length : 0) : 0;
+                if (blockedCount > 0) {
+                    cloned.groups = cloned.groups.map(g => updateHeaderCount(g, blockedCount));
                 }
             }
+
+            return hasFiltered ? cloned : props;
+        } catch (_) {
+            return props;
         }
-
-        if (!hiddenRows) return props;
-
-        let leadingOffset = 0;
-        for (let i = 0; i < newRows.length; i++) {
-            const r = newRows[i];
-            if (r && isGroupRow(r)) break;
-            if (r !== undefined) leadingOffset++;
-        }
-
-        let indexSum = leadingOffset;
-        for (let i = 0; i < newGroups.length; i++) {
-            const grp = newGroups[i];
-            if (grp && grp.id !== 'content-inventory-feed') {
-                grp.index = indexSum;
-                if (typeof grp.count === 'number' && grp.count > 0) {
-                    indexSum += (grp.count + 1);
-                }
-            }
-        }
-
-        for (let i = 0; i < newRows.length; i++) {
-            const r = newRows[i];
-            if (r && isGroupRow(r) && typeof r.count === 'number' && r.count <= 0) {
-                newRows[i] = undefined;
-            }
-        }
-
-        const removeEmptyWithin = (array, filter) => {
-            let reversed = [].concat(array).reverse();
-            let suffixLength = 0;
-            for (let i = 0; i < reversed.length; i++) {
-                if (reversed[i] !== undefined) {
-                    suffixLength = i;
-                    break;
-                }
-            }
-            return [].concat(array.filter(filter), new Array(suffixLength));
-        };
-
-        const finalRows = removeEmptyWithin(newRows, n => n !== undefined);
-        if (newGroups[0] && newGroups[0].id === 'content-inventory-feed') {
-            newGroups[0].index = finalRows.length - (newGroups[0].count + 1);
-        }
-        const finalGroups = removeEmptyWithin(newGroups, g => g && g.count > 0);
-
-        for (let i = 0; i < finalGroups.length; i++) {
-            const grp = finalGroups[i];
-            let actualIdx = finalRows.findIndex(r => r && isGroupRow(r) && r.id === grp.id);
-            if (actualIdx === -1) actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
-            if (actualIdx !== -1) grp.index = actualIdx;
-        }
-
-        return {
-            ...props,
-            rows: finalRows,
-            groups: finalGroups
-        };
     }
 
     function syncFromRelationshipStore() {
@@ -825,6 +779,12 @@
             if (typeof RelationshipStore.getIgnoredUserIds === 'function') {
                 safePatch('instead', RelationshipStore, 'getIgnoredUserIds', () => []);
             }
+            if (typeof RelationshipStore.getBlockedOrIgnoredUserIds === 'function') {
+                safePatch('instead', RelationshipStore, 'getBlockedOrIgnoredUserIds', () => []);
+            }
+            if (typeof RelationshipStore.getBlockedOrIgnoredIDs === 'function') {
+                safePatch('instead', RelationshipStore, 'getBlockedOrIgnoredIDs', () => []);
+            }
             if (typeof RelationshipStore.getRelationships === 'function') {
                 safePatch('instead', RelationshipStore, 'getRelationships', function(args, orig) {
                     const res = orig ? orig.apply(this, args) : {};
@@ -850,6 +810,18 @@
                     return orig ? orig.apply(this, args) : 0;
                 });
             }
+            if (typeof RelationshipStore.getBlockedCount === 'function') {
+                safePatch('instead', RelationshipStore, 'getBlockedCount', () => 0);
+            }
+            if (typeof RelationshipStore.getIgnoredCount === 'function') {
+                safePatch('instead', RelationshipStore, 'getIgnoredCount', () => 0);
+            }
+            if (typeof RelationshipStore.hasBlocked === 'function') {
+                safePatch('instead', RelationshipStore, 'hasBlocked', () => false);
+            }
+            if (typeof RelationshipStore.hasIgnored === 'function') {
+                safePatch('instead', RelationshipStore, 'hasIgnored', () => false);
+            }
             if (typeof RelationshipStore.isBlocked === 'function') {
                 safePatch('instead', RelationshipStore, 'isBlocked', () => false);
             }
@@ -858,11 +830,54 @@
             }
         }
 
-        // B. Native Settings Form Components (TableRow, FormRow, FormSection, TableRowGroup)
+        // B. Multi-Component Interception across all Metro Form & Table modules
         try {
+            const formKeys = [
+                'TableSection',
+                'TableRow',
+                'TableRowGroup',
+                'TableSwitchRow',
+                'TableActionRow',
+                'TableRadioRow',
+                'TableCheckboxRow',
+                'FormSection',
+                'FormSectionTitle',
+                'FormRow',
+                'FormHelpText',
+                'FormNotice',
+                'FormText',
+                'FormDivider',
+                'SettingsSection',
+                'SettingsRow',
+                'SettingsRowGroup',
+                'SettingsListSection',
+                'SettingsNotice',
+                'SettingsHelpText'
+            ];
+
             const settingsTargetMods = new Set();
             if (_vendetta.ui?.components?.Forms) settingsTargetMods.add(_vendetta.ui.components.Forms);
-            const formKeys = ['TableRow', 'TableRowGroup', 'TableSwitchRow', 'FormRow', 'FormSection'];
+            if (_vendetta.ui?.components) settingsTargetMods.add(_vendetta.ui.components);
+
+            // 1. Find all modules via findAll
+            if (typeof _metro.findAll === 'function') {
+                try {
+                    const all = _metro.findAll(m => {
+                        if (!m || typeof m !== 'object') return false;
+                        for (const p of formKeys) {
+                            if (typeof m[p] === 'function' || (m.default && typeof m.default[p] === 'function')) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    });
+                    if (Array.isArray(all)) {
+                        for (const mod of all) settingsTargetMods.add(mod);
+                    }
+                } catch (_) {}
+            }
+
+            // 2. Find via findByProps, findByName, and findByDisplayName
             for (const p of formKeys) {
                 if (_metro.findByProps) {
                     try {
@@ -870,15 +885,54 @@
                         if (m && typeof m === 'object') settingsTargetMods.add(m);
                     } catch (_) {}
                 }
+                if (typeof _metro.findByName === 'function') {
+                    try {
+                        const c = _metro.findByName(p);
+                        if (typeof c === 'function') settingsTargetMods.add({ [p]: c });
+                    } catch (_) {}
+                }
+                if (typeof _metro.findByDisplayName === 'function') {
+                    try {
+                        const c = _metro.findByDisplayName(p);
+                        if (typeof c === 'function') settingsTargetMods.add({ [p]: c });
+                    } catch (_) {}
+                }
             }
+
+            // 3. Patch every found component
             for (const mod of settingsTargetMods) {
                 for (const k of formKeys) {
                     if (typeof mod[k] === 'function') {
                         safePatch('instead', mod, k, function(args, orig) {
                             const p = args[0] || {};
                             if (isSettingsBlockedSection(p)) return renderEmptyRow();
+                            if (Array.isArray(p.children)) {
+                                p.children = p.children.filter(c => !isSettingsBlockedSection(c));
+                            }
                             const res = orig ? orig.apply(this, args) : null;
-                            if (res && res.props && isSettingsBlockedSection(res.props)) return renderEmptyRow();
+                            if (res && res.props) {
+                                if (isSettingsBlockedSection(res.props)) return renderEmptyRow();
+                                if (Array.isArray(res.props.children)) {
+                                    res.props.children = res.props.children.filter(c => !isSettingsBlockedSection(c));
+                                }
+                            }
+                            return res;
+                        });
+                    }
+                    if (mod.default && typeof mod.default === 'object' && typeof mod.default[k] === 'function') {
+                        safePatch('instead', mod.default, k, function(args, orig) {
+                            const p = args[0] || {};
+                            if (isSettingsBlockedSection(p)) return renderEmptyRow();
+                            if (Array.isArray(p.children)) {
+                                p.children = p.children.filter(c => !isSettingsBlockedSection(c));
+                            }
+                            const res = orig ? orig.apply(this, args) : null;
+                            if (res && res.props) {
+                                if (isSettingsBlockedSection(res.props)) return renderEmptyRow();
+                                if (Array.isArray(res.props.children)) {
+                                    res.props.children = res.props.children.filter(c => !isSettingsBlockedSection(c));
+                                }
+                            }
                             return res;
                         });
                     }
@@ -886,7 +940,50 @@
             }
         } catch (_) {}
 
-        // C. Friends Navigation Tablist Filter
+        // C. Filter Section Data Builders & Layout Hooks
+        try {
+            const sectionBuilderKeys = [
+                'getSettingsSections',
+                'useSettingsSections',
+                'getContentAndSocialSettings',
+                'useContentAndSocialSettings',
+                'getContentAndSocialSections',
+                'useContentAndSocialSections',
+                'getPrivacySettingsSections',
+                'usePrivacySettingsSections',
+                'getAccountSettingsSections',
+                'useAccountSettingsSections',
+                'getSettingListSections',
+                'useSettingListSections'
+            ];
+
+            for (const fnName of sectionBuilderKeys) {
+                if (_metro.findByProps) {
+                    try {
+                        const mod = _metro.findByProps(fnName);
+                        if (mod && typeof mod[fnName] === 'function') {
+                            safePatch('after', mod, fnName, function(args, res) {
+                                if (Array.isArray(res)) {
+                                    return res.filter(s => !isSettingsBlockedSection(s)).map(s => {
+                                        if (!s || typeof s !== 'object') return s;
+                                        const cloned = { ...s };
+                                        for (const key of ['items', 'rows', 'data', 'children', 'sections']) {
+                                            if (Array.isArray(cloned[key])) {
+                                                cloned[key] = cloned[key].filter(it => !isSettingsBlockedSection(it));
+                                            }
+                                        }
+                                        return cloned;
+                                    });
+                                }
+                                return res;
+                            });
+                        }
+                    } catch (_) {}
+                }
+            }
+        } catch (_) {}
+
+        // D. Friends Navigation Tablist Filter
         try {
             const friendsNavMod = _metro.findByProps && _metro.findByProps('FriendsTabs', 'getFriendsTabs');
             if (friendsNavMod) {
@@ -947,7 +1044,7 @@
 
     function startPlugin() {
         try {
-            console.log('[Revengecord Plugin Suite v4.0.0] Initializing...');
+            console.log('[Revengecord Plugin Suite v4.1.0] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -1015,30 +1112,30 @@
             applyBypassBlockedOrIgnored();
 
             notifyActive();
-            console.log('[Revengecord Plugin Suite v4.0.0] Loaded and active successfully.');
+            console.log('[Revengecord Plugin Suite v4.1.0] Loaded and active successfully.');
         } catch (e) {
-            console.error('[Revengecord Plugin Suite v4.0.0 Error]', e);
+            console.error('[Revengecord Plugin Suite v4.1.0 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[Revengecord Plugin Suite v4.0.0] Stopping...');
+            console.log('[Revengecord Plugin Suite v4.1.0] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[Revengecord Plugin Suite v4.0.0] Stopped cleanly.');
+            console.log('[Revengecord Plugin Suite v4.1.0] Stopped cleanly.');
         } catch (e) {
-            console.error('[Revengecord Plugin Suite v4.0.0 Error stopping]', e);
+            console.error('[Revengecord Plugin Suite v4.1.0 Error stopping]', e);
         }
     }
 
     const pluginExport = {
         name: 'Revengecord Plugin Suite',
-        description: 'Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored with 1:1 Desktop Parity. All memory engines, media prefetchers, and reliability pre-warmers abolished.',
+        description: 'Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored with 1:1 Desktop Parity. Completely eliminates blocked & ignored accounts from Content & Social settings, chat, member lists, and voice channels.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '4.0.0',
+        version: '4.1.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,

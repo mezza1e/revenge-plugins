@@ -233,31 +233,77 @@
         return false;
     }
 
+    // Normalization handles ASCII and curly typographical apostrophes (' vs ’)
+    function normalizeSettingsText(str) {
+        if (typeof str !== 'string') return '';
+        return str
+            .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
+            .trim()
+            .toLowerCase();
+    }
+
+    function isSettingsBlockedString(str) {
+        if (typeof str !== 'string') return false;
+        const s = normalizeSettingsText(str);
+        if (!s) return false;
+
+        return s.includes("accounts you've blocked or ignored") ||
+               s.includes("accounts you've blocked") ||
+               s.includes("blocked or ignored") ||
+               s.includes("blocked accounts") ||
+               s.includes("ignored accounts") ||
+               s.includes("blocked users") ||
+               s.includes("ignored users") ||
+               s.includes("you're in control") ||
+               s.includes("reducing unwanted interactions") ||
+               s.includes("explore our feature guide") ||
+               s.includes("feature guide") ||
+               s === "blocked" ||
+               s === "ignored";
+    }
+
     function isSettingsBlockedSection(val, depth = 0) {
-        if (!val || depth > 5) return false;
+        if (!val || depth > 6) return false;
+
+        // 1. Plain string
         if (typeof val === 'string') {
-            const lower = val.trim().toLowerCase();
-            return lower.includes("accounts you've blocked or ignored") ||
-                   lower.includes("accounts you've blocked") ||
-                   lower.includes("blocked or ignored") ||
-                   lower.startsWith("blocked accounts") ||
-                   lower.startsWith("ignored accounts") ||
-                   lower === "blocked users" ||
-                   lower === "ignored users" ||
-                   (lower === "blocked" && depth > 0);
+            return isSettingsBlockedString(val);
         }
-        if (typeof val === 'object') {
-            for (const k of ['label', 'text', 'title', 'header', 'subLabel', 'description', 'accessibilityLabel', 'aria-label']) {
-                if (val[k] && isSettingsBlockedSection(val[k], depth + 1)) return true;
+
+        // 2. Array of items / children
+        if (Array.isArray(val)) {
+            const combined = val
+                .filter(c => typeof c === 'string')
+                .join(' ');
+            if (combined && isSettingsBlockedString(combined)) return true;
+
+            for (let i = 0; i < val.length; i++) {
+                if (isSettingsBlockedSection(val[i], depth + 1)) return true;
             }
-            if (val.props && isSettingsBlockedSection(val.props, depth + 1)) return true;
-            if (typeof val.children === 'string' && isSettingsBlockedSection(val.children, depth + 1)) return true;
-            if (Array.isArray(val.children)) {
-                for (const c of val.children) {
-                    if (typeof c === 'string' && isSettingsBlockedSection(c, depth + 1)) return true;
+            return false;
+        }
+
+        // 3. Object / React Element / Props
+        if (typeof val === 'object') {
+            const checkKeys = [
+                'label', 'title', 'header', 'subLabel', 'text', 'description',
+                'accessibilityLabel', 'aria-label', 'footer', 'helpText',
+                'trailingText', 'leadingText', 'detail', 'value', 'subTitle',
+                'hint', 'note', 'body', 'content', 'sectionTitle', 'titleText',
+                'name', 'children'
+            ];
+
+            for (const k of checkKeys) {
+                if (val[k] != null && isSettingsBlockedSection(val[k], depth + 1)) {
+                    return true;
                 }
             }
+
+            if (val.props && typeof val.props === 'object') {
+                if (isSettingsBlockedSection(val.props, depth + 1)) return true;
+            }
         }
+
         return false;
     }
 
@@ -279,7 +325,7 @@
         if (React && typeof React.createElement === 'function' && View) {
             try {
                 return React.createElement(View, {
-                    style: { height: 0, width: 0, opacity: 0, overflow: 'hidden' },
+                    style: { display: 'none', height: 0, width: 0, opacity: 0, overflow: 'hidden' },
                     pointerEvents: 'none'
                 });
             } catch (_) {}
@@ -356,12 +402,16 @@
             const row = rows[i];
             if (!row || typeof row !== 'object' || row.type == null) continue;
             if (row.type === 2 || row.rowType === 2 || row.hidden === true) continue;
-            if (row.message && (isBlockedOrIgnored(row.message.author?.id) || blockedMessageIdsSet.has(String(row.message.id)))) continue;
-            if (row.item && (isBlockedOrIgnored(row.item.author?.id) || blockedMessageIdsSet.has(String(row.item.id)))) continue;
-
-            if (row.message) sanitizeMessage(row.message);
-            if (row.item) sanitizeMessage(row.item);
-            if (row.reply) delete row.reply;
+            if (row.message) {
+                const authorId = row.message.author?.id || row.author?.id;
+                if (isBlockedOrIgnored(authorId) || blockedMessageIdsSet.has(String(row.message.id))) continue;
+                sanitizeMessage(row.message);
+            }
+            if (row.item) {
+                const authorId = row.item.author?.id;
+                if (isBlockedOrIgnored(authorId) || blockedMessageIdsSet.has(String(row.item.id))) continue;
+                sanitizeMessage(row.item);
+            }
             temp.push(row);
         }
         return pruneOrphanedDateDividers(temp);
@@ -369,123 +419,27 @@
 
     function sanitizeDesktopStyleChannelMembers(props) {
         if (!props || typeof props !== 'object') return props;
-        if (!Array.isArray(props.rows) || !Array.isArray(props.groups)) return props;
+        try {
+            const cloned = { ...props };
+            let hasFiltered = false;
 
-        let hiddenRows = false;
-        const newGroups = props.groups.map(g => (g && typeof g === 'object') ? { ...g } : g);
-        const newRows = new Array(props.rows.length);
-
-        const groupMap = new Map();
-        newGroups.forEach(g => { if (g && g.id) groupMap.set(g.id, g); });
-
-        const isGroupRow = row => {
-            if (!row || typeof row !== 'object') return false;
-            return row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true ||
-                   (typeof row.id === 'string' && groupMap.has(row.id));
-        };
-
-        const isMemberRow = row => {
-            if (!row || typeof row !== 'object') return false;
-            if (isGroupRow(row)) return false;
-            return row.type === 'MEMBER' || row.rowType === 'MEMBER' || !!(row.user || row.member || row.userId || row.nick);
-        };
-
-        for (let i = 0; i < props.rows.length; i++) {
-            const row = props.rows[i];
-            if (!row || typeof row !== 'object') {
-                newRows[i] = row;
-                continue;
-            }
-            if (!isMemberRow(row)) {
-                newRows[i] = row;
-                continue;
-            }
-            if (!isMemberBlockedOrIgnored(row)) {
-                newRows[i] = row;
-                continue;
+            if (Array.isArray(cloned.rows)) {
+                const origLen = cloned.rows.length;
+                cloned.rows = cloned.rows.filter(r => !isMemberBlockedOrIgnored(r));
+                if (cloned.rows.length !== origLen) hasFiltered = true;
             }
 
-            hiddenRows = true;
-            newRows[i] = undefined;
-
-            let found = false;
-            let rowIndex = i - 1;
-            while (!found && rowIndex > -1) {
-                const prev = newRows[rowIndex];
-                if (prev && isGroupRow(prev)) {
-                    found = true;
-                    const groupIndex = newGroups.findIndex(g => g && g.id === prev.id);
-                    if (groupIndex > -1 && typeof newGroups[groupIndex].count === 'number') {
-                        newGroups[groupIndex].count = Math.max(0, newGroups[groupIndex].count - 1);
-                        if (typeof newGroups[groupIndex].title === 'string') {
-                            newGroups[groupIndex].title = newGroups[groupIndex].title.replace(/(\d+)(?=[^\d]*$)/, String(newGroups[groupIndex].count));
-                        }
-                        prev.count = newGroups[groupIndex].count;
-                        prev.title = newGroups[groupIndex].title;
-                    }
-                } else {
-                    rowIndex--;
+            if (Array.isArray(cloned.groups)) {
+                const blockedCount = props.rows ? props.rows.length - (cloned.rows ? cloned.rows.length : 0) : 0;
+                if (blockedCount > 0) {
+                    cloned.groups = cloned.groups.map(g => updateHeaderCount(g, blockedCount));
                 }
             }
+
+            return hasFiltered ? cloned : props;
+        } catch (_) {
+            return props;
         }
-
-        if (!hiddenRows) return props;
-
-        let leadingOffset = 0;
-        for (let i = 0; i < newRows.length; i++) {
-            const r = newRows[i];
-            if (r && isGroupRow(r)) break;
-            if (r !== undefined) leadingOffset++;
-        }
-
-        let indexSum = leadingOffset;
-        for (let i = 0; i < newGroups.length; i++) {
-            const grp = newGroups[i];
-            if (grp && grp.id !== 'content-inventory-feed') {
-                grp.index = indexSum;
-                if (typeof grp.count === 'number' && grp.count > 0) {
-                    indexSum += (grp.count + 1);
-                }
-            }
-        }
-
-        for (let i = 0; i < newRows.length; i++) {
-            const r = newRows[i];
-            if (r && isGroupRow(r) && typeof r.count === 'number' && r.count <= 0) {
-                newRows[i] = undefined;
-            }
-        }
-
-        const removeEmptyWithin = (array, filter) => {
-            let reversed = [].concat(array).reverse();
-            let suffixLength = 0;
-            for (let i = 0; i < reversed.length; i++) {
-                if (reversed[i] !== undefined) {
-                    suffixLength = i;
-                    break;
-                }
-            }
-            return [].concat(array.filter(filter), new Array(suffixLength));
-        };
-
-        const finalRows = removeEmptyWithin(newRows, n => n !== undefined);
-        if (newGroups[0] && newGroups[0].id === 'content-inventory-feed') {
-            newGroups[0].index = finalRows.length - (newGroups[0].count + 1);
-        }
-        const finalGroups = removeEmptyWithin(newGroups, g => g && g.count > 0);
-
-        for (let i = 0; i < finalGroups.length; i++) {
-            const grp = finalGroups[i];
-            let actualIdx = finalRows.findIndex(r => r && isGroupRow(r) && r.id === grp.id);
-            if (actualIdx === -1) actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
-            if (actualIdx !== -1) grp.index = actualIdx;
-        }
-
-        return {
-            ...props,
-            rows: finalRows,
-            groups: finalGroups
-        };
     }
 
     function syncFromRelationshipStore() {

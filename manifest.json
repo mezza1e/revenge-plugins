@@ -1,6 +1,6 @@
 {
     "name": "Revengecord Plugin Suite",
-    "description": "Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored. All memory engines, media prefetchers, and reliability pre-warmers abolished.",
+    "description": "Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored. Completely eliminates blocked & ignored accounts from Content & Social settings, chat, member lists, and voice channels.",
     "authors": [
         {
             "name": "Antigravity",
@@ -8,6 +8,6 @@
         }
     ],
     "main": "index.js",
-    "version": "4.0.0",
-    "hash": "ea12445e8852c814a1a7928582013699f298492a13389b32ec41f667d8c60680"
+    "version": "4.1.0",
+    "hash": "bd6ec0179738e9bce42b25fc4e126b7ac36be95abe4311349c9eaffab8d8393d"
 }

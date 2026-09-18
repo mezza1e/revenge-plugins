@@ -1,4 +1,4 @@
-# Revengecord Plugins by mezza1e (v4.0.0)
+# Revengecord Plugins by mezza1e (v4.1.0)
 
 Clean, high-performance mobile ports of essential Discord desktop plugins for **Revengecord / Vendetta / Bunny**.
 
@@ -13,7 +13,7 @@ Features **RemoveBlockedUsers**, **HideBlockedInSettings**, and **BypassBlockedO
 In Revengecord mobile app, go to **Settings > Plugins > Install Plugin** and paste:
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.0.0/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.1.0/
 ```
 
 *(Alternative GitHub Pages URL: `https://mezza1e.github.io/revenge-plugins/`)*
@@ -38,19 +38,21 @@ If you prefer installing each feature as an independent plugin matching your des
 * Suppresses typing indicators and presence.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.0.0/removeblockedusers/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.1.0/removeblockedusers/
 ```
 
 ---
 
-### 2. HideBlockedInSettings (v1.3.0)
+### 2. HideBlockedInSettings (v1.4.0)
 *Parity with Antigravity's HideBlockedInSettings*
-* Hides "Blocked Accounts" and "Ignored Accounts" sections from all Settings tabs and forms.
+* Hides "Accounts you've blocked or ignored" section header from **Content & Social** settings.
+* Hides "Blocked accounts" and "Ignored accounts" rows.
+* Hides the feature guide disclaimer note ("You're in control. To compare your options...").
 * Hides the "Blocked" tab from the Friends navigation list.
 * Returns empty arrays for settings relationship queries.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.0.0/hideblockedinsettings/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.1.0/hideblockedinsettings/
 ```
 
 ---
@@ -61,7 +63,7 @@ https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.0.0/hideblockedinsettings/
 * Suppresses the warning popup when a blocked or ignored user joins your active voice channel.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.0.0/bypassblockedorignored/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.1.0/bypassblockedorignored/
 ```
 
 ---
