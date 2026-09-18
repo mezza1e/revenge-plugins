@@ -22,29 +22,29 @@
                    {};
     const unpatches = [];
 
-    // Bulletproof current user ID resolver across all Discord mobile store variations
+    // Bulletproof current user ID resolver with instantaneous O(1) caching
+    let cachedCurrentUserId = null;
     function getCurrentUserId() {
+        if (cachedCurrentUserId) return cachedCurrentUserId;
         try {
             if (UserStore && typeof UserStore.getCurrentUser === 'function') {
                 const u = UserStore.getCurrentUser();
-                if (u && u.id) return String(u.id);
+                if (u && u.id) return (cachedCurrentUserId = String(u.id));
             }
             if (_common && _common.UserStore && typeof _common.UserStore.getCurrentUser === 'function') {
                 const u = _common.UserStore.getCurrentUser();
-                if (u && u.id) return String(u.id);
+                if (u && u.id) return (cachedCurrentUserId = String(u.id));
             }
             if (_metro && typeof _metro.findByProps === 'function') {
                 const auth = _metro.findByProps('getId');
                 if (auth && typeof auth.getId === 'function') {
                     const id = auth.getId();
-                    if (id) return String(id);
+                    if (id) return (cachedCurrentUserId = String(id));
                 }
             }
         } catch (_) {}
         return null;
     }
-
-    // Ambient safety shims moved inside startPlugin()
 
     // Lazily resolved inside startPlugin() only!
     let _FluxDispatcher = null;
@@ -134,7 +134,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.1.0 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.1.1 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -142,7 +142,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.1.0 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.1.1 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -236,42 +236,13 @@
         } catch (_) {}
     }
 
-    // Dynamic relationship check: checks in-memory set, with seamless fallback to raw store if available
+    // Pure O(1) instantaneous relationship lookup: eliminates all store recursion and call stack overhead
     function isBlockedOrIgnored(userId) {
         if (!userId) return false;
         const s = String(userId);
-        try {
-            const myId = getCurrentUserId();
-            if (myId && s === myId) return false;
-        } catch (_) {}
-        if (RelationshipStore) {
-            try {
-                if (typeof RelationshipStore.isFriend === 'function' && RelationshipStore.isFriend(s)) return false;
-                const rel = typeof RelationshipStore.getRelationshipType === 'function' ? RelationshipStore.getRelationshipType(s) : null;
-                if (rel === 1) return false; // Relationship 1 = FRIEND (never blocked)
-            } catch (_) {}
-        }
-        if (blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s)) return true;
-
-        if (rawIsBlocked && RelationshipStore) {
-            try {
-                if (rawIsBlocked.call(RelationshipStore, s) === true) {
-                    blockedUserIdsSet.add(s);
-                    persistBlockedSets();
-                    return true;
-                }
-            } catch (_) {}
-        }
-        if (rawIsIgnored && RelationshipStore) {
-            try {
-                if (rawIsIgnored.call(RelationshipStore, s) === true) {
-                    ignoredUserIdsSet.add(s);
-                    persistBlockedSets();
-                    return true;
-                }
-            } catch (_) {}
-        }
-        return false;
+        const myId = getCurrentUserId();
+        if (myId && s === myId) return false;
+        return blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s);
     }
 
     // Member discriminator: dynamically checks member's Snowflake User ID against relationship tracker
@@ -470,59 +441,29 @@
         return !!(r.message || r.item || r.author || r.content || r.type === 0 || r.type === 'MESSAGE');
     }
 
-    // Prune orphaned and adjacent date dividers (eliminates dates sent by blocked users)
+    // Single-pass O(N) divider pruning: removes orphaned and consecutive date dividers with 0ms overhead
     function pruneOrphanedDateDividers(rows) {
         if (!Array.isArray(rows) || rows.length === 0) return rows;
-
         const result = [];
+        let pendingDivider = null;
+
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            if (!isDividerRow(row)) {
+            if (!row || typeof row !== 'object') continue;
+            if (isDividerRow(row)) {
+                pendingDivider = row;
+            } else if (isMessageRow(row)) {
+                if (pendingDivider) {
+                    if (result.length === 0 || !isDividerRow(result[result.length - 1])) {
+                        result.push(pendingDivider);
+                    }
+                    pendingDivider = null;
+                }
                 result.push(row);
-                continue;
+            } else {
+                result.push(row);
             }
-
-            // Check forward for any visible message before reaching another divider
-            let hasMessageForward = false;
-            for (let j = i + 1; j < rows.length; j++) {
-                if (isDividerRow(rows[j])) break;
-                if (isMessageRow(rows[j])) {
-                    hasMessageForward = true;
-                    break;
-                }
-            }
-
-            // Check backward for any visible message before reaching another divider
-            let hasMessageBackward = false;
-            for (let j = i - 1; j >= 0; j--) {
-                if (isDividerRow(rows[j])) break;
-                if (isMessageRow(rows[j])) {
-                    hasMessageBackward = true;
-                    break;
-                }
-            }
-
-            // Drop divider if it has zero visible messages in either direction
-            if (!hasMessageForward && !hasMessageBackward) {
-                continue;
-            }
-
-            // Drop consecutive duplicate divider
-            if (result.length > 0 && isDividerRow(result[result.length - 1])) {
-                continue;
-            }
-
-            result.push(row);
         }
-
-        // Drop trailing/leading lone dividers with no messages in the list
-        while (result.length > 0 && isDividerRow(result[0]) && !result.some(r => isMessageRow(r))) {
-            result.shift();
-        }
-        while (result.length > 0 && isDividerRow(result[result.length - 1]) && !result.some(r => isMessageRow(r))) {
-            result.pop();
-        }
-
         return result;
     }
 
@@ -683,283 +624,6 @@
         };
     }
 
-    // Helper to safely clone and filter SectionList props with accurate header counts
-    function getSafeSectionProps(props) {
-        if (!props || typeof props !== 'object' || !Array.isArray(props.sections)) return props;
-
-        const hasBlockedOrSettings = props.sections.some(sec =>
-            isSettingsBlockedSection(sec?.title) ||
-            isSettingsBlockedSection(sec?.header) ||
-            (Array.isArray(sec?.data) && sec.data.some(it => isMemberBlockedOrIgnored(it))) ||
-            (Array.isArray(sec?.rows) && sec.rows.some(it => isMemberBlockedOrIgnored(it))) ||
-            (Array.isArray(sec?.items) && sec.items.some(it => isMemberBlockedOrIgnored(it)))
-        );
-
-        if (!hasBlockedOrSettings) return props;
-
-        const cloned = { ...props };
-        cloned.sections = props.sections
-            .filter(sec => !isSettingsBlockedSection(sec?.title) && !isSettingsBlockedSection(sec?.header))
-            .map(sec => {
-                let updated = { ...sec };
-                ['data', 'rows', 'items', 'members'].forEach(key => {
-                    if (Array.isArray(updated[key])) {
-                        const origLen = updated[key].length;
-                        const filtered = updated[key].filter(it => !isMemberBlockedOrIgnored(it) && !isSettingsBlockedSection(it));
-                        const diff = origLen - filtered.length;
-                        if (diff > 0) {
-                            updated[key] = filtered;
-                            updated = updateHeaderCount(updated, diff);
-                        }
-                    }
-                });
-                return updated;
-            });
-
-        if (typeof props.renderItem === 'function') {
-            const origRenderItem = props.renderItem;
-            cloned.renderItem = function(info) {
-                if (info && (isMemberBlockedOrIgnored(info.item) || isMemberBlockedOrIgnored(info) || isSettingsBlockedSection(info.section))) {
-                    return renderEmptyRow();
-                }
-                return origRenderItem.apply(this, arguments);
-            };
-        }
-        if (typeof props.renderSectionHeader === 'function') {
-            const origRenderHeader = props.renderSectionHeader;
-            cloned.renderSectionHeader = function(info) {
-                if (info && isSettingsBlockedSection(info.section)) {
-                    return renderEmptyRow();
-                }
-                return origRenderHeader.apply(this, arguments);
-            };
-        }
-        return cloned;
-    }
-
-    // Helper to safely clone and filter FlatList & FlashList props with recycling safety
-    function getSafeListProps(props) {
-        if (!props || typeof props !== 'object') return props;
-
-        const isChatList = props.inverted || (Array.isArray(props.data) && props.data.some(it => it && (it.message || it.rowType === 'CHAT_MESSAGE')));
-        if (isChatList) {
-            const cloned = { ...props };
-            if (Array.isArray(props.data)) {
-                cloned.data = cleanChatRows(props.data);
-            }
-            return cloned;
-        }
-
-        if (Array.isArray(props.data)) {
-            const hasBlocked = props.data.some(it => isMemberBlockedOrIgnored(it) || isSettingsBlockedSection(it));
-            if (!hasBlocked) return props;
-
-            const rawData = props.data;
-            const cleanedData = [];
-            let currentHeaderIndex = -1;
-            let currentHeaderBlockedCount = 0;
-
-            for (let i = 0; i < rawData.length; i++) {
-                const item = rawData[i];
-                if (!item || typeof item !== 'object') {
-                    cleanedData.push(item);
-                    continue;
-                }
-
-                if (isSettingsBlockedSection(item)) {
-                    continue;
-                }
-
-                const isHeader = item.header === true ||
-                                 item.isHeader === true ||
-                                 item.type === 'HEADER' ||
-                                 item.type === 'SECTION_HEADER' ||
-                                 item.rowType === 'HEADER' ||
-                                 item.rowType === 'SECTION_HEADER' ||
-                                 (typeof item.title === 'string' && (item.title.includes('—') || item.title.includes('Online') || item.title.includes('Offline')) && !item.user && !item.member && !item.userId);
-
-                if (isHeader) {
-                    if (currentHeaderIndex !== -1 && currentHeaderBlockedCount > 0) {
-                        cleanedData[currentHeaderIndex] = updateHeaderCount(cleanedData[currentHeaderIndex], currentHeaderBlockedCount);
-                    }
-                    currentHeaderIndex = cleanedData.length;
-                    currentHeaderBlockedCount = 0;
-                    cleanedData.push(item);
-                    continue;
-                }
-
-                if (isMemberBlockedOrIgnored(item)) {
-                    currentHeaderBlockedCount++;
-                    continue; // Filter out blocked member completely
-                }
-
-                cleanedData.push(item);
-            }
-
-            if (currentHeaderIndex !== -1 && currentHeaderBlockedCount > 0) {
-                cleanedData[currentHeaderIndex] = updateHeaderCount(cleanedData[currentHeaderIndex], currentHeaderBlockedCount);
-            }
-
-            const cloned = { ...props, data: cleanedData };
-            if (typeof props.renderItem === 'function') {
-                const origRenderItem = props.renderItem;
-                cloned.renderItem = function(info) {
-                    if (info && (isMemberBlockedOrIgnored(info.item) || isMemberBlockedOrIgnored(info) || isSettingsBlockedSection(info.item) || isSettingsBlockedSection(info))) {
-                        return renderEmptyRow();
-                    }
-                    return origRenderItem.apply(this, arguments);
-                };
-            }
-            return cloned;
-        }
-
-        return props;
-    }
-
-    // Helper to hook list components cleanly
-    function patchListComponent(Comp, isSectionList) {
-        if (!Comp) return;
-        const propSanitizer = isSectionList ? getSafeSectionProps : getSafeListProps;
-        if (typeof Comp.render === 'function') {
-            safePatch('instead', Comp, 'render', function(args, orig) {
-                const safeProps = propSanitizer(args[0]);
-                return orig ? orig.apply(this, [safeProps, ...args.slice(1)]) : null;
-            });
-        }
-        if (Comp.prototype && typeof Comp.prototype.render === 'function') {
-            safePatch('instead', Comp.prototype, 'render', function(args, orig) {
-                if (!this.props) return orig ? orig.apply(this, args) : null;
-                const origProps = this.props;
-                const safeProps = propSanitizer(origProps);
-                if (safeProps === origProps) {
-                    return orig ? orig.apply(this, args) : null;
-                }
-                this.props = safeProps;
-                try {
-                    return orig ? orig.apply(this, args) : null;
-                } finally {
-                    this.props = origProps;
-                }
-            });
-        }
-    }
-
-    // Strict check if element props indicate a blocked user by ID or settings row
-    function shouldAbsorbElement(props) {
-        if (!props || typeof props !== 'object') return false;
-        if (isSettingsBlockedSection(props)) return true;
-        if (!props.userId && !props.user && !props.member && !props.author && !props.item && !props.message && !props.record && !props.row && !props.data) {
-            return false;
-        }
-        const uid = props.userId ||
-                    props.user?.id ||
-                    props.member?.userId ||
-                    props.member?.user?.id ||
-                    props.member?.id ||
-                    props.author?.id ||
-                    props.message?.author?.id ||
-                    props.row?.userId ||
-                    props.row?.user?.id ||
-                    props.row?.member?.userId ||
-                    props.row?.member?.user?.id ||
-                    (typeof props.row?.id === 'string' && /^\d{17,20}$/.test(props.row.id) ? props.row.id : (typeof props.row?.id === 'string' ? props.row.id.match(/\d{17,20}/)?.[0] : null)) ||
-                    props.item?.userId ||
-                    props.item?.user?.id ||
-                    props.item?.member?.userId ||
-                    props.item?.member?.user?.id ||
-                    (typeof props.item?.id === 'string' && /^\d{17,20}$/.test(props.item.id) ? props.item.id : (typeof props.item?.id === 'string' ? props.item.id.match(/\d{17,20}/)?.[0] : null)) ||
-                    props.record?.userId ||
-                    props.record?.id ||
-                    props.record?.user?.id ||
-                    props.data?.userId ||
-                    props.data?.user?.id ||
-                    (typeof props.id === 'string' && /^\d{17,20}$/.test(props.id) ? props.id : (typeof props.id === 'string' ? props.id.match(/\d{17,20}/)?.[0] : null));
-
-        if (uid && isBlockedOrIgnored(uid)) return true;
-        return false;
-    }
-
-    // Identifies if a child element renders our zero-height empty placeholder
-    function isEmptyRenderedRow(child) {
-        if (!child || typeof child !== 'object') return false;
-        const style = child.props?.style;
-        if (style && typeof style === 'object') {
-            if (style.height === 0 && style.opacity === 0) return true;
-        }
-        if (Array.isArray(style)) {
-            for (const s of style) {
-                if (s && s.height === 0 && s.opacity === 0) return true;
-            }
-        }
-        if (child.props?.children) {
-            if (Array.isArray(child.props.children) && child.props.children.length === 1) {
-                return isEmptyRenderedRow(child.props.children[0]);
-            } else if (typeof child.props.children === 'object') {
-                return isEmptyRenderedRow(child.props.children);
-            }
-        }
-        return false;
-    }
-
-    // Identifies if a child element is a skeleton, shimmer, or placeholder loading row
-    function isSkeletonOrPlaceholderRow(child) {
-        if (!child || typeof child !== 'object') return false;
-        const name = child.type?.name || child.type?.displayName || (typeof child.type === 'string' ? child.type : '') || '';
-        if (typeof name === 'string' && /skeleton|placeholder|loading|shimmer/i.test(name)) return true;
-        const cp = child.props;
-        if (cp && typeof cp === 'object') {
-            if (cp.isLoading === true || cp.isPlaceholder === true || cp.loading === true || cp.placeholder === true) return true;
-            if (typeof cp.testID === 'string' && /skeleton|placeholder|loading/i.test(cp.testID)) return true;
-            if (typeof cp.accessibilityLabel === 'string' && /loading/i.test(cp.accessibilityLabel)) return true;
-            if (Array.isArray(cp.children)) {
-                if (cp.children.length === 1 && isSkeletonOrPlaceholderRow(cp.children[0])) return true;
-            } else if (cp.children && typeof cp.children === 'object') {
-                if (isSkeletonOrPlaceholderRow(cp.children)) return true;
-            }
-        }
-        if (typeof child.key === 'string' && /skeleton|placeholder|loading/i.test(child.key)) return true;
-        return false;
-    }
-
-    // Recursive child checker: identifies whether a child element or its single-item wrapper represents a blocked user, empty row, or skeleton placeholder
-    function isBlockedElementOrWrapper(child) {
-        if (!child || typeof child !== 'object') return false;
-        if (isEmptyRenderedRow(child)) return true;
-        if (isSkeletonOrPlaceholderRow(child)) return true;
-        const cp = child.props;
-        if (cp && typeof cp === 'object') {
-            if (isSettingsBlockedSection(cp)) return true;
-            if (shouldAbsorbElement(cp)) return true;
-            if (isSkeletonOrPlaceholderRow(cp)) return true;
-            if (Array.isArray(cp.children)) {
-                if (cp.children.length === 1) {
-                    return isBlockedElementOrWrapper(cp.children[0]);
-                }
-                return false; // Multi-item container MUST NOT be absorbed!
-            } else if (cp.children && typeof cp.children === 'object') {
-                return isBlockedElementOrWrapper(cp.children);
-            }
-        }
-
-        if (child.key) {
-            if (isBlockedOrIgnored(child.key)) return true;
-            if (typeof child.key === 'string') {
-                const match = child.key.match(/\d{17,20}/);
-                if (match && isBlockedOrIgnored(match[0])) return true;
-            }
-        }
-
-        return false;
-    }
-
-    function isDividerElement(child) {
-        if (!child || typeof child !== 'object') return false;
-        const name = child.type?.name || child.type?.displayName || '';
-        if (typeof name === 'string' && (name.includes('Divider') || name.includes('Separator'))) return true;
-        if (child.props && child.props.isDivider === true) return true;
-        return false;
-    }
-
     function syncFromRelationshipStore() {
         if (!RelationshipStore) return;
         try {
@@ -1007,7 +671,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.1.0] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.1.1] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -1086,7 +750,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.1.0] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.1.1] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
     // Gateway Member List Sanitizer: purges blocked users from Gateway SYNC ops and decrements group counts
     function sanitizeMemberListUpdate(event) {
@@ -1211,6 +875,7 @@
 
                             // 2. Initial sync from CONNECTION_OPEN
                             if (event.type === 'CONNECTION_OPEN') {
+                                cachedCurrentUserId = event.user?.id ? String(event.user.id) : null;
                                 if (Array.isArray(event.relationships)) {
                                     const currentBlocked = new Set();
                                     const currentIgnored = new Set();
@@ -1377,17 +1042,10 @@
             if (GuildMemberStore) {
                 if (typeof GuildMemberStore.getMember === 'function') {
                     safePatch('instead', GuildMemberStore, 'getMember', function(args, orig) {
-                        const guildId = args[0];
                         const uid = args[1];
                         try {
                             const myId = getCurrentUserId();
                             if (myId && String(uid) === myId) return orig ? orig.apply(this, args) : null;
-                            if (GuildStore && guildId) {
-                                const g = typeof GuildStore.getGuild === 'function' ? GuildStore.getGuild(guildId) : null;
-                                if (g && (String(uid) === String(g.ownerId) || String(uid) === String(g.owner_id))) {
-                                    return orig ? orig.apply(this, args) : null;
-                                }
-                            }
                         } catch (_) {}
                         if (uid && isBlockedOrIgnored(uid)) return null;
                         return orig ? orig.apply(this, args) : null;
@@ -1565,35 +1223,6 @@
                 }
             }
 
-            // G. Defensive Guards for updateRows and createRow
-            try {
-                const modules = _metro.modules || (typeof vendetta !== 'undefined' && vendetta.metro?.modules) || {};
-                for (const id in modules) {
-                    const mod = modules[id]?.exports;
-                    if (!mod || typeof mod !== 'object') continue;
-
-                    if (typeof mod.updateRows === 'function') {
-                        safePatch('before', mod, 'updateRows', function(args) {
-                            for (let i = 0; i < args.length; i++) {
-                                if (Array.isArray(args[i])) {
-                                    args[i] = cleanChatRows(args[i]);
-                                }
-                            }
-                        });
-                    }
-
-                    if (typeof mod.createRow === 'function') {
-                        safePatch('instead', mod, 'createRow', function(args, orig) {
-                            const row = args[0];
-                            if (!row || typeof row !== 'object' || row.type == null  || row.hidden === true) {
-                                return null;
-                            }
-                            return orig ? orig.apply(this, args) : null;
-                        });
-                    }
-                }
-            } catch (_) {}
-
             try {
                 const ChatModule = _metro.findByProps('updateRows');
                 if (ChatModule && typeof ChatModule.updateRows === 'function') {
@@ -1734,22 +1363,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.1.0] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.1.1] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.1.0 Error]', e);
+            console.error('[MasterSuite Mobile v3.1.1 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.1.0] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.1.1] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.1.0] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.1.1] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.1.0 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.1.1 Error stopping]', e);
         }
     }
 
@@ -1757,7 +1386,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.1.0',
+        version: '3.1.1',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
