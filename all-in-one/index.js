@@ -42,6 +42,51 @@
         } catch (_) {}
     }
 
+    
+    // Mobile Profile Pre-warmer: pre-warms profiles and banners of active chat authors
+    const profileWarmedSet = new Set();
+    function prewarmAuthorsProfiles(messages) {
+        if (!Array.isArray(messages) || !messages.length) return;
+        try {
+            const UserProfileActions = (_metro.findByProps && _metro.findByProps('fetchProfile')) ||
+                                       (_common.UserProfileActions);
+            if (!UserProfileActions || typeof UserProfileActions.fetchProfile !== 'function') return;
+
+            const uniqueAuthors = [];
+            for (let i = messages.length - 1; i >= 0 && uniqueAuthors.length < 6; i--) {
+                const aId = messages[i]?.author?.id;
+                if (aId && /^\d+$/.test(aId) && !profileWarmedSet.has(aId) && !isBlockedOrIgnored(aId)) {
+                    profileWarmedSet.add(aId);
+                    uniqueAuthors.push(aId);
+                }
+            }
+
+            if (profileWarmedSet.size > 250) {
+                const first = profileWarmedSet.values().next().value;
+                profileWarmedSet.delete(first);
+            }
+
+            uniqueAuthors.forEach((uId, idx) => {
+                setTimeout(() => {
+                    try {
+                        const upStore = _metro.findByProps && _metro.findByProps('getUserProfile');
+                        if (upStore && typeof upStore.getUserProfile === 'function') {
+                            const cached = upStore.getUserProfile(uId);
+                            if (cached) return;
+                        }
+                        UserProfileActions.fetchProfile(uId, { withMutualGuilds: true, withMutualFriendsCount: true }).then(res => {
+                            const profile = res?.body || res;
+                            if (profile) {
+                                if (profile.banner) preloadMobileMedia(`https://cdn.discordapp.com/banners/${uId}/${profile.banner}.webp?size=480`);
+                                if (profile.user?.avatar) preloadMobileMedia(`https://cdn.discordapp.com/avatars/${uId}/${profile.user.avatar}.webp?size=160`);
+                            }
+                        }).catch(() => {});
+                    } catch (_) {}
+                }, 200 + idx * 300);
+            });
+        } catch (_) {}
+    }
+
     function preloadMessagesMedia(messages, defer = false) {
         if (!Array.isArray(messages) || !messages.length) return;
         const task = () => {
@@ -192,7 +237,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.2.3 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.2.4 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -200,7 +245,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.2.3 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.2.4 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -729,7 +774,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.2.3] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.2.4] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -808,7 +853,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.2.3] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.2.4] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
     // Gateway Member List Sanitizer: purges blocked users from Gateway SYNC ops and decrements group counts
     function sanitizeMemberListUpdate(event) {
@@ -990,6 +1035,7 @@
                                         const cm = MessageStore.getMessages(event.channelId);
                                         if (cm && Array.isArray(cm._array) && cm._array.length > 0) {
                                             preloadMessagesMedia(cm._array);
+                                            prewarmAuthorsProfiles(cm._array);
                                         }
                                     }
                                     // Mobile Unlimited Guild Channel Pre-warmer with Pacing and isPreload: true
@@ -1448,22 +1494,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.2.3] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.2.4] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.2.3 Error]', e);
+            console.error('[MasterSuite Mobile v3.2.4 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.2.3] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.2.4] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.2.3] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.2.4] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.2.3 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.2.4 Error stopping]', e);
         }
     }
 
@@ -1471,7 +1517,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.2.3',
+        version: '3.2.4',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,

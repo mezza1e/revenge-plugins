@@ -34,6 +34,37 @@
         } catch (_) {}
     }
 
+    
+    const profileWarmedSet = new Set();
+    function prewarmAuthorsProfiles(messages) {
+        if (!Array.isArray(messages) || !messages.length) return;
+        try {
+            const UserProfileActions = (_metro.findByProps && _metro.findByProps('fetchProfile')) ||
+                                       (_common.UserProfileActions);
+            if (!UserProfileActions || typeof UserProfileActions.fetchProfile !== 'function') return;
+
+            const uniqueAuthors = [];
+            for (let i = messages.length - 1; i >= 0 && uniqueAuthors.length < 6; i--) {
+                const aId = messages[i]?.author?.id;
+                if (aId && /^\d+$/.test(aId) && !profileWarmedSet.has(aId)) {
+                    profileWarmedSet.add(aId);
+                    uniqueAuthors.push(aId);
+                }
+            }
+
+            uniqueAuthors.forEach((uId, idx) => {
+                setTimeout(() => {
+                    try {
+                        UserProfileActions.fetchProfile(uId, { withMutualGuilds: true, withMutualFriendsCount: true }).then(res => {
+                            const profile = res?.body || res;
+                            if (profile?.banner) preloadMobileMedia(`https://cdn.discordapp.com/banners/${uId}/${profile.banner}.webp?size=480`);
+                        }).catch(() => {});
+                    } catch (_) {}
+                }, 200 + idx * 300);
+            });
+        } catch (_) {}
+    }
+
     function preloadMessagesMedia(messages) {
         if (!Array.isArray(messages) || !messages.length) return;
         for (const msg of messages) {
@@ -81,6 +112,7 @@
                                 setTimeout(() => preloadMessagesMedia(event.messages), 400);
                             } else {
                                 preloadMessagesMedia(event.messages);
+                            prewarmAuthorsProfiles(event.messages);
                             }
                         }
                         if (event.type === 'LOAD_MESSAGES_FAILURE' || event.type === 'MESSAGE_FETCH_FAILED') {
