@@ -1,7 +1,7 @@
 /**
- * @name RemoveBlockedUsers
- * @description Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.
- * @version 1.8.1
+ * @name BypassBlockedOrIgnored
+ * @description Bypass the blocked or ignored user modal if present in voice channels.
+ * @version 1.0.12
  * @author Antigravity (Parity with DevilBro & nicola02nb)
  */
 (function(vendettaArg) {
@@ -112,7 +112,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'RemoveBlockedUsers v1.8.1: ACTIVE'
+                    content: 'BypassBlockedOrIgnored v1.0.12: ACTIVE'
                 });
                 return;
             }
@@ -120,7 +120,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('RemoveBlockedUsers v1.8.1: ACTIVE');
+                showToast('BypassBlockedOrIgnored v1.0.12: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -522,303 +522,50 @@
         } catch (_) {}
     }
 
-    function applyRemoveBlockedUsers() {
-        // A. FluxDispatcher: Chat Message Filtering & Relationship Sync
-        if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
-            safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
-                const event = args[0];
-                if (event && typeof event === 'object') {
+    function applyBypassBlockedOrIgnored() {
+        try {
+            // A. Bypass warning modal when connecting to voice
+            const voiceMod = _metro.findByProps && _metro.findByProps('handleVoiceConnect');
+            if (voiceMod && typeof voiceMod.handleVoiceConnect === 'function') {
+                safePatch('before', voiceMod, 'handleVoiceConnect', function(args) {
                     try {
-                        if (event.type === 'RELATIONSHIP_ADD' && event.relationship) {
-                            const rid = String(event.relationship.id);
-                            if (event.relationship.type === 2) blockedUserIdsSet.add(rid);
-                            if (event.relationship.type === 5) ignoredUserIdsSet.add(rid);
-                            persistBlockedSets();
-                        }
-                        if (event.type === 'RELATIONSHIP_REMOVE') {
-                            const rid = String(event.relationship?.id || event.userId || '');
-                            if (rid) {
-                                blockedUserIdsSet.delete(rid);
-                                ignoredUserIdsSet.delete(rid);
-                                persistBlockedSets();
-                            }
-                        }
-                        if (event.type === 'CONNECTION_OPEN') {
-                            cachedCurrentUserId = event.user?.id ? String(event.user.id) : null;
-                            if (Array.isArray(event.relationships)) {
-                                blockedUserIdsSet.clear();
-                                ignoredUserIdsSet.clear();
-                                for (const r of event.relationships) {
-                                    const rid = String(r.id);
-                                    if (r.type === 2) blockedUserIdsSet.add(rid);
-                                    if (r.type === 5) ignoredUserIdsSet.add(rid);
-                                }
-                                persistBlockedSets();
-                            }
-                        }
-
-                        // Filter messages
-                        if (event.type === 'LOAD_MESSAGES_SUCCESS' && Array.isArray(event.messages)) {
-                            event.messages = event.messages.filter(msg => {
-                                if (!msg) return false;
-                                if (isBlockedOrIgnored(msg.author?.id)) {
-                                    if (msg.id) blockedMessageIdsSet.add(String(msg.id));
-                                    return false;
-                                }
-                                return true;
-                            });
-                            for (const msg of event.messages) sanitizeMessage(msg);
-                        }
-                        if ((event.type === 'MESSAGE_CREATE' || event.type === 'MESSAGE_UPDATE') && event.message) {
-                            if (isBlockedOrIgnored(event.message.author?.id)) {
-                                if (event.message.id) blockedMessageIdsSet.add(String(event.message.id));
-                                event.channelId = '0';
-                                return;
-                            }
-                            sanitizeMessage(event.message);
-                        }
-                        if (event.type === 'TYPING_START' && isBlockedOrIgnored(event.userId)) {
-                            return;
-                        }
-                        if (event.type === 'PRESENCE_UPDATE') {
-                            const uid = event.user?.id || event.userId;
-                            if (uid && isBlockedOrIgnored(uid)) return;
+                        if (args[0] && typeof args[0] === 'object') {
+                            args[0].bypassBlockedWarningModal = true;
                         }
                     } catch (_) {}
-                }
-                return orig ? orig.apply(this, args) : null;
-            });
-        }
-
-        // B. ChannelMemberStore
-        if (ChannelMemberStore) {
-            if (typeof ChannelMemberStore.getProps === 'function') {
-                safePatch('after', ChannelMemberStore, 'getProps', function(args, res) {
-                    return sanitizeDesktopStyleChannelMembers(res);
                 });
             }
-            if (typeof ChannelMemberStore.getRows === 'function') {
-                safePatch('after', ChannelMemberStore, 'getRows', function(args, res) {
-                    if (!Array.isArray(res)) return res;
-                    return res.filter(r => !isMemberBlockedOrIgnored(r));
-                });
-            }
-        }
 
-        // C. MemberListStore
-        if (MemberListStore) {
-            if (typeof MemberListStore.getMemberListSections === 'function') {
-                safePatch('instead', MemberListStore, 'getMemberListSections', function(args, orig) {
-                    const sections = orig ? orig.apply(this, args) : [];
-                    if (!Array.isArray(sections)) return sections;
-                    return sections.map(sec => {
-                        if (!sec || typeof sec !== 'object') return sec;
-                        let updated = { ...sec };
-                        ['rows', 'items', 'data', 'members'].forEach(key => {
-                            if (Array.isArray(updated[key])) {
-                                const origLen = updated[key].length;
-                                const filtered = updated[key].filter(it => !isMemberBlockedOrIgnored(it));
-                                const diff = origLen - filtered.length;
-                                if (diff > 0) {
-                                    updated[key] = filtered;
-                                    updated = updateHeaderCount(updated, diff);
-                                }
-                            }
-                        });
-                        return updated;
+            // B. Force channel blocked/ignored sets to return empty sets
+            const boiHelpers = _metro.findByProps && _metro.findByProps('getBlockedUsersForVoiceChannel', 'getIgnoredUsersForVoiceChannel');
+            if (boiHelpers) {
+                if (typeof boiHelpers.getBlockedUsersForVoiceChannel === 'function') {
+                    safePatch('instead', boiHelpers, 'getBlockedUsersForVoiceChannel', function() {
+                        return new Set();
                     });
-                });
-            }
-            if (typeof MemberListStore.getRows === 'function') {
-                safePatch('instead', MemberListStore, 'getRows', function(args, orig) {
-                    const rows = orig ? orig.apply(this, args) : [];
-                    if (!Array.isArray(rows)) return rows;
-                    return rows.filter(r => !isMemberBlockedOrIgnored(r));
-                });
-            }
-        }
-
-        // D. GuildMemberStore
-        if (GuildMemberStore) {
-            if (typeof GuildMemberStore.getMember === 'function') {
-                safePatch('instead', GuildMemberStore, 'getMember', function(args, orig) {
-                    const uid = args[1];
-                    try {
-                        const myId = getCurrentUserId();
-                        if (myId && String(uid) === myId) return orig ? orig.apply(this, args) : null;
-                    } catch (_) {}
-                    if (uid && isBlockedOrIgnored(uid)) return null;
-                    return orig ? orig.apply(this, args) : null;
-                });
-            }
-            if (typeof GuildMemberStore.getMembers === 'function') {
-                safePatch('instead', GuildMemberStore, 'getMembers', function(args, orig) {
-                    const res = orig ? orig.apply(this, args) : [];
-                    if (!Array.isArray(res)) return res;
-                    return res.filter(m => !isMemberBlockedOrIgnored(m));
-                });
-            }
-            if (typeof GuildMemberStore.getMemberIds === 'function') {
-                safePatch('instead', GuildMemberStore, 'getMemberIds', function(args, orig) {
-                    const res = orig ? orig.apply(this, args) : [];
-                    if (!Array.isArray(res)) return res;
-                    return res.filter(id => !isBlockedOrIgnored(id));
-                });
-            }
-            if (typeof GuildMemberStore.isMember === 'function') {
-                safePatch('instead', GuildMemberStore, 'isMember', function(args, orig) {
-                    const uid = args[1];
-                    if (uid && isBlockedOrIgnored(uid)) return false;
-                    return orig ? orig.apply(this, args) : false;
-                });
-            }
-        }
-
-        // E. PresenceStore
-        if (PresenceStore) {
-            if (typeof PresenceStore.getStatus === 'function') {
-                safePatch('instead', PresenceStore, 'getStatus', function(args, orig) {
-                    const uid = args[0];
-                    if (uid && isBlockedOrIgnored(uid)) return 'offline';
-                    return orig ? orig.apply(this, args) : 'offline';
-                });
-            }
-            if (typeof PresenceStore.getState === 'function') {
-                safePatch('after', PresenceStore, 'getState', function(args, res) {
-                    if (!res || typeof res !== 'object') return res;
-                    const cloned = { ...res };
-                    for (const uid of blockedUserIdsSet) delete cloned[uid];
-                    return cloned;
-                });
-            }
-        }
-
-        // F. MessageStore
-        if (MessageStore && typeof MessageStore.getMessage === 'function') {
-            safePatch('after', MessageStore, 'getMessage', function(args, res) {
-                if (res) sanitizeMessage(res);
-                return res;
-            });
-        }
-
-        // G. RowManager: Chat Row Elimination
-        if (RowManager && RowManager.prototype) {
-            safePatch('before', RowManager.prototype, 'generate', function(args) {
-                const data = args[0];
-                if (!data) return;
-                if (data.message) {
-                    if (isBlockedOrIgnored(data.message.author?.id) || blockedMessageIdsSet.has(String(data.message.id))) {
-                        data.hidden = true;
-                        data.renderContentOnly = true;
-                        data.message.content = '';
-                        data.message.reactions = [];
-                        data.message.canShowComponents = false;
-                        delete data.timestamp;
-                        delete data.date;
-                    }
-                    sanitizeMessage(data.message);
                 }
-                if (data.rowType === 2 || data.type === 2) {
-                    data.hidden = true;
-                    data.renderContentOnly = true;
-                    data.roleStyle = '';
-                    data.text = '';
-                    data.revealed = false;
-                    data.content = [];
-                    data.count = 0;
-                }
-                if (data.reply || data.referencedMessage || data.referenced_message) {
-                    const ref = data.referencedMessage || data.referenced_message || data.reply?.message;
-                    if (ref && (isBlockedOrIgnored(ref.author?.id) || blockedMessageIdsSet.has(String(ref.id)))) {
-                        delete data.reply;
-                        delete data.referencedMessage;
-                        delete data.referenced_message;
-                        if (data.message) {
-                            data.message.type = 0;
-                            delete data.message.referenced_message;
-                        }
-                    }
-                }
-            });
-
-            safePatch('after', RowManager.prototype, 'generate', function(args, res) {
-                if (!res) return res;
-                if (res.message) {
-                    if (isBlockedOrIgnored(res.message.author?.id) || blockedMessageIdsSet.has(String(res.message.id))) {
-                        res.hidden = true;
-                        res.renderContentOnly = true;
-                        res.text = '';
-                        res.content = [];
-                        delete res.timestamp;
-                        delete res.date;
-                        return res;
-                    }
-                    sanitizeMessage(res.message);
-                }
-                if (res.rowType === 2 || res.type === 2) {
-                    res.hidden = true;
-                    res.renderContentOnly = true;
-                    res.roleStyle = '';
-                    res.text = '';
-                    res.revealed = false;
-                    res.content = [];
-                    res.count = 0;
-                }
-                return res;
-            });
-
-            if (typeof RowManager.prototype.getRows === 'function') {
-                safePatch('instead', RowManager.prototype, 'getRows', function(args, orig) {
-                    const res = orig ? orig.apply(this, args) : [];
-                    if (!Array.isArray(res)) return res;
-                    return cleanChatRows(res);
-                });
-            }
-        }
-
-        try {
-            const ChatModule = _metro.findByProps('updateRows');
-            if (ChatModule && typeof ChatModule.updateRows === 'function') {
-                safePatch('before', ChatModule, 'updateRows', function(args) {
-                    for (let i = 0; i < args.length; i++) {
-                        if (Array.isArray(args[i])) args[i] = cleanChatRows(args[i]);
-                    }
-                });
-            }
-        } catch (_) {}
-
-        // H. TypingStore
-        if (TypingStore && typeof TypingStore.getTypingUsers === 'function') {
-            safePatch('instead', TypingStore, 'getTypingUsers', function(args, orig) {
-                const res = orig ? orig.apply(this, args) : {};
-                if (!res || typeof res !== 'object') return res;
-                const filtered = {};
-                for (const uId in res) {
-                    if (!isBlockedOrIgnored(uId)) filtered[uId] = res[uId];
-                }
-                return filtered;
-            });
-        }
-
-        // I. Direct Member Row Component Hooks
-        try {
-            const memberRowNames = ['MemberListItem', 'GuildMemberRow', 'ChannelMemberRow', 'MemberRow', 'GuildMemberListItem'];
-            for (const name of memberRowNames) {
-                const holder = _metro.findByProps && _metro.findByProps(name);
-                if (holder && typeof holder[name] === 'function') {
-                    safePatch('instead', holder, name, function(args, orig) {
-                        const props = args[0];
-                        if (isMemberBlockedOrIgnored(props)) return renderEmptyRow();
-                        return orig ? orig.apply(this, args) : null;
+                if (typeof boiHelpers.getIgnoredUsersForVoiceChannel === 'function') {
+                    safePatch('instead', boiHelpers, 'getIgnoredUsersForVoiceChannel', function() {
+                        return new Set();
                     });
                 }
             }
-        } catch (_) {}
+
+            // C. Suppress modal when a blocked or ignored user joins your voice channel
+            const boiJoin = _metro.findByProps && _metro.findByProps('handleBlockedOrIgnoredUserVoiceChannelJoin');
+            if (boiJoin && typeof boiJoin.handleBlockedOrIgnoredUserVoiceChannelJoin === 'function') {
+                safePatch('instead', boiJoin, 'handleBlockedOrIgnoredUserVoiceChannelJoin', function() {
+                    return;
+                });
+            }
+        } catch (e) {
+            console.error('[BypassBlockedOrIgnored Error]', e);
+        }
     }
 
     function startPlugin() {
         try {
-            console.log('[RemoveBlockedUsers v1.8.1] Initializing...');
+            console.log('[BypassBlockedOrIgnored v1.0.12] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -881,33 +628,33 @@
                 rawGetPresenceStatus = PresenceStore.getStatus;
             }
 
-            applyRemoveBlockedUsers();
+            applyBypassBlockedOrIgnored();
 
             notifyActive();
-            console.log('[RemoveBlockedUsers v1.8.1] Loaded and active successfully.');
+            console.log('[BypassBlockedOrIgnored v1.0.12] Loaded and active successfully.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.1 Error]', e);
+            console.error('[BypassBlockedOrIgnored v1.0.12 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[RemoveBlockedUsers v1.8.1] Stopping...');
+            console.log('[BypassBlockedOrIgnored v1.0.12] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[RemoveBlockedUsers v1.8.1] Stopped cleanly.');
+            console.log('[BypassBlockedOrIgnored v1.0.12] Stopped cleanly.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.1 Error stopping]', e);
+            console.error('[BypassBlockedOrIgnored v1.0.12 Error stopping]', e);
         }
     }
 
     const pluginExport = {
-        name: 'RemoveBlockedUsers',
-        description: 'Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.',
+        name: 'BypassBlockedOrIgnored',
+        description: 'Bypass the blocked or ignored user modal if present in voice channels.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.8.1',
+        version: '1.0.12',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,

@@ -1,5 +1,5 @@
 {
-    "name": "RemoveBlockedUsers (ByeBlocked)",
+    "name": "RemoveBlockedUsers",
     "description": "Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.",
     "authors": [
         {

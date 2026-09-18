@@ -1,0 +1,13 @@
+{
+    "name": "HideBlockedInSettings",
+    "description": "Hides Ignored and Blocked Users sections from all Settings tabs and Friends tablist.",
+    "authors": [
+        {
+            "name": "Antigravity",
+            "id": "698947564459917343"
+        }
+    ],
+    "main": "index.js",
+    "version": "1.3.0",
+    "hash": "8f622099ed1de8e95db9ff2c9b249ad34ebb462d788a1ba5cbf0181e58cb3a41"
+}

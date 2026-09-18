@@ -1,0 +1,17 @@
+{
+    "name": "BypassBlockedOrIgnored",
+    "description": "Bypass the blocked or ignored user modal if present in voice channels.",
+    "authors": [
+        {
+            "name": "nicola02nb",
+            "id": "690558489377407000"
+        },
+        {
+            "name": "Antigravity",
+            "id": "698947564459917343"
+        }
+    ],
+    "main": "index.js",
+    "version": "1.0.12",
+    "hash": "8b9f2298089ebf1b0db286877e45f73275a7218f7a11e806e6c665ad87ed16e1"
+}

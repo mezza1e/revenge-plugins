@@ -1,6 +1,6 @@
 {
-    "name": "Antigravity Master Suite",
-    "description": "All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.",
+    "name": "Revengecord Plugin Suite",
+    "description": "Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored. All memory engines, media prefetchers, and reliability pre-warmers abolished.",
     "authors": [
         {
             "name": "Antigravity",
@@ -8,6 +8,6 @@
         }
     ],
     "main": "index.js",
-    "version": "3.2.4",
-    "hash": "3b215df6c3b062d0b8601594f6a642fc13cf351f1429a4d6c44e619a41de3dda"
+    "version": "4.0.0",
+    "hash": "ea12445e8852c814a1a7928582013699f298492a13389b32ec41f667d8c60680"
 }
