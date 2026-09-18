@@ -134,7 +134,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.0.6 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.0.7 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -142,7 +142,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.0.6 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.0.7 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -281,12 +281,14 @@
         try {
             const myId = getCurrentUserId();
             const uid = item.userId || item.user?.id || item.member?.userId || item.member?.user?.id ||
+                        item.row?.userId || item.row?.user?.id || item.row?.member?.userId || item.row?.member?.user?.id ||
+                        item.item?.userId || item.item?.user?.id || item.item?.member?.userId || item.item?.member?.user?.id ||
                         (typeof item.id === 'string' && /^\d{17,20}$/.test(item.id) ? item.id : (typeof item.id === 'string' ? item.id.match(/\d{17,20}/)?.[0] : null));
             if (myId && uid && String(uid) === myId) return false;
         } catch (_) {}
 
         // Guard against pure Channel or Guild navigation items that have no user/member data
-        if (!item.user && !item.member && !item.userId && !item.author && !item.record &&
+        if (!item.user && !item.member && !item.userId && !item.author && !item.record && !item.row && !item.item &&
             (item.guild != null || item.channel != null || item.guild_id != null || item.recipient_ids != null)) {
             return false;
         }
@@ -296,6 +298,14 @@
                     item.member?.userId ||
                     item.member?.user?.id ||
                     item.member?.id ||
+                    item.row?.userId ||
+                    item.row?.user?.id ||
+                    item.row?.member?.userId ||
+                    item.row?.member?.user?.id ||
+                    item.item?.userId ||
+                    item.item?.user?.id ||
+                    item.item?.member?.userId ||
+                    item.item?.member?.user?.id ||
                     item.author?.id ||
                     item.record?.userId ||
                     item.record?.id ||
@@ -564,6 +574,21 @@
         const newGroups = props.groups.map(g => (g && typeof g === 'object') ? { ...g } : g);
         const newRows = new Array(props.rows.length);
 
+        const groupMap = new Map();
+        newGroups.forEach(g => { if (g && g.id) groupMap.set(g.id, g); });
+
+        const isGroupRow = row => {
+            if (!row || typeof row !== 'object') return false;
+            return row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true ||
+                   (typeof row.id === 'string' && groupMap.has(row.id));
+        };
+
+        const isMemberRow = row => {
+            if (!row || typeof row !== 'object') return false;
+            if (isGroupRow(row)) return false;
+            return row.type === 'MEMBER' || row.rowType === 'MEMBER' || !!(row.user || row.member || row.userId || row.nick);
+        };
+
         for (let i = 0; i < props.rows.length; i++) {
             const row = props.rows[i];
             // 1. Preserve non-member rows and lazy null placeholders
@@ -572,10 +597,7 @@
                 continue;
             }
 
-            const isGroup = row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true;
-            const isMember = row.type === 'MEMBER' || row.rowType === 'MEMBER' || (!isGroup && (row.user || row.member || row.userId));
-
-            if (!isMember) {
+            if (!isMemberRow(row)) {
                 newRows[i] = row;
                 continue;
             }
@@ -594,7 +616,7 @@
             let rowIndex = i - 1;
             while (!found && rowIndex > -1) {
                 const prev = newRows[rowIndex];
-                if (prev && typeof prev === 'object' && (prev.type === 'GROUP' || prev.rowType === 'GROUP' || prev.header === true)) {
+                if (prev && isGroupRow(prev)) {
                     found = true;
                     const groupIndex = newGroups.findIndex(g => g && g.id === prev.id);
                     if (groupIndex > -1 && typeof newGroups[groupIndex].count === 'number') {
@@ -618,7 +640,7 @@
         let leadingOffset = 0;
         for (let i = 0; i < newRows.length; i++) {
             const r = newRows[i];
-            if (r && typeof r === 'object' && (r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true)) {
+            if (r && isGroupRow(r)) {
                 break;
             }
             if (r !== undefined) leadingOffset++;
@@ -638,7 +660,7 @@
         // Mark empty groups as undefined in rows
         for (let i = 0; i < newRows.length; i++) {
             const r = newRows[i];
-            if (r && typeof r === 'object' && (r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true) && r.count <= 0) {
+            if (r && isGroupRow(r) && typeof r.count === 'number' && r.count <= 0) {
                 newRows[i] = undefined;
             }
         }
@@ -666,7 +688,7 @@
         // Dynamic index alignment for each remaining group
         for (let i = 0; i < finalGroups.length; i++) {
             const grp = finalGroups[i];
-            let actualIdx = finalRows.findIndex(r => r && (r.type === 'GROUP' || r.rowType === 'GROUP' || r.header === true) && r.id === grp.id);
+            let actualIdx = finalRows.findIndex(r => r && isGroupRow(r) && r.id === grp.id);
             if (actualIdx === -1) actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
             if (actualIdx !== -1) grp.index = actualIdx;
         }
@@ -843,7 +865,7 @@
     function shouldAbsorbElement(props) {
         if (!props || typeof props !== 'object') return false;
         if (isSettingsBlockedSection(props)) return true;
-        if (!props.userId && !props.user && !props.member && !props.author && !props.item && !props.message && !props.record) {
+        if (!props.userId && !props.user && !props.member && !props.author && !props.item && !props.message && !props.record && !props.row && !props.data) {
             return false;
         }
         const uid = props.userId ||
@@ -853,21 +875,53 @@
                     props.member?.id ||
                     props.author?.id ||
                     props.message?.author?.id ||
+                    props.row?.userId ||
+                    props.row?.user?.id ||
+                    props.row?.member?.userId ||
+                    props.row?.member?.user?.id ||
+                    (typeof props.row?.id === 'string' && /^\d{17,20}$/.test(props.row.id) ? props.row.id : (typeof props.row?.id === 'string' ? props.row.id.match(/\d{17,20}/)?.[0] : null)) ||
                     props.item?.userId ||
-                    props.item?.id ||
                     props.item?.user?.id ||
                     props.item?.member?.userId ||
+                    props.item?.member?.user?.id ||
+                    (typeof props.item?.id === 'string' && /^\d{17,20}$/.test(props.item.id) ? props.item.id : (typeof props.item?.id === 'string' ? props.item.id.match(/\d{17,20}/)?.[0] : null)) ||
                     props.record?.userId ||
                     props.record?.id ||
-                    props.record?.user?.id;
+                    props.record?.user?.id ||
+                    props.data?.userId ||
+                    props.data?.user?.id ||
+                    (typeof props.id === 'string' && /^\d{17,20}$/.test(props.id) ? props.id : (typeof props.id === 'string' ? props.id.match(/\d{17,20}/)?.[0] : null));
 
         if (uid && isBlockedOrIgnored(uid)) return true;
         return false;
     }
 
-    // Recursive child checker: identifies whether a child element or its single-item wrapper represents a blocked user
+    // Identifies if a child element renders our zero-height empty placeholder
+    function isEmptyRenderedRow(child) {
+        if (!child || typeof child !== 'object') return false;
+        const style = child.props?.style;
+        if (style && typeof style === 'object') {
+            if (style.height === 0 && style.opacity === 0) return true;
+        }
+        if (Array.isArray(style)) {
+            for (const s of style) {
+                if (s && s.height === 0 && s.opacity === 0) return true;
+            }
+        }
+        if (child.props?.children) {
+            if (Array.isArray(child.props.children) && child.props.children.length === 1) {
+                return isEmptyRenderedRow(child.props.children[0]);
+            } else if (typeof child.props.children === 'object') {
+                return isEmptyRenderedRow(child.props.children);
+            }
+        }
+        return false;
+    }
+
+    // Recursive child checker: identifies whether a child element or its single-item wrapper represents a blocked user or empty row
     function isBlockedElementOrWrapper(child) {
         if (!child || typeof child !== 'object') return false;
+        if (isEmptyRenderedRow(child)) return true;
         const cp = child.props;
         if (cp && typeof cp === 'object') {
             if (isSettingsBlockedSection(cp)) return true;
@@ -948,7 +1002,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.0.6] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.0.7] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -1027,7 +1081,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.0.6] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.0.7] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
             // --- 1. FluxDispatcher Gateway & Dispatch Patches ---
             if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
@@ -1747,22 +1801,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.0.6] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.0.7] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.6 Error]', e);
+            console.error('[MasterSuite Mobile v3.0.7 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.0.6] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.0.7] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.0.6] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.0.7] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.0.6 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.0.7 Error stopping]', e);
         }
     }
 
@@ -1770,7 +1824,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.0.6',
+        version: '3.0.7',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
