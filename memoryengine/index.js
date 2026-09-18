@@ -16,6 +16,21 @@
     function onLoad() {
         try {
             console.log('[DiscordMemoryEngine Mobile] Initializing (Unlimited Channel Cache Mode)...');
+
+            try {
+                const FlatListMod = (_metro.findByProps && _metro.findByProps('FlatList')) ||
+                                    (_common.React && _common.React.FlatList ? { FlatList: _common.React.FlatList } : null);
+                const TargetList = FlatListMod?.FlatList?.defaultProps ? FlatListMod.FlatList :
+                                   (FlatListMod?.default?.defaultProps ? FlatListMod.default : null);
+                if (TargetList && TargetList.defaultProps) {
+                    TargetList.defaultProps.removeClippedSubviews = true;
+                    TargetList.defaultProps.maxToRenderPerBatch = 6;
+                    TargetList.defaultProps.windowSize = 5;
+                    TargetList.defaultProps.updateCellsBatchingPeriod = 50;
+                    console.log('[DiscordMemoryEngine Mobile] Applied FlatList virtualization tuning.');
+                }
+            } catch (_) {}
+
             if (!_patcher || !_patcher.before) return;
 
             if (_FluxDispatcher) {

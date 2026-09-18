@@ -56,7 +56,7 @@
                 }
             }
             if (typeof msg.content === 'string' && msg.content.includes('<')) {
-                const matches = msg.content.matchAll(/<a?:[a-zA-Z0-9_]+:(d+)>/g);
+                const matches = msg.content.matchAll(/<a?:[a-zA-Z0-9_]+:(\d+)>/g);
                 for (const m of matches) {
                     preloadMobileMedia(`https://cdn.discordapp.com/emojis/${m[1]}.webp?size=64&quality=lossless`);
                 }
@@ -76,7 +76,12 @@
                     _patcher.after('dispatch', _FluxDispatcher, ([event]) => {
                         if (!event) return;
                                                 if (event.type === 'LOAD_MESSAGES_SUCCESS' && Array.isArray(event.messages)) {
-                            preloadMessagesMedia(event.messages);
+                            const isHistorical = event.isBefore === true;
+                            if (isHistorical) {
+                                setTimeout(() => preloadMessagesMedia(event.messages), 400);
+                            } else {
+                                preloadMessagesMedia(event.messages);
+                            }
                         }
                         if (event.type === 'LOAD_MESSAGES_FAILURE' || event.type === 'MESSAGE_FETCH_FAILED') {
                             const chId = event.channelId;

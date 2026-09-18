@@ -22,6 +22,64 @@
                    {};
     const unpatches = [];
 
+    // Mobile Media Pre-loader & Scroll-Aware Prefetcher
+    const mobilePrefetchedUrls = new Set();
+    function preloadMobileMedia(url) {
+        if (!url || typeof url !== 'string' || mobilePrefetchedUrls.has(url)) return;
+        mobilePrefetchedUrls.add(url);
+        if (mobilePrefetchedUrls.size > 800) {
+            const first = mobilePrefetchedUrls.values().next().value;
+            mobilePrefetchedUrls.delete(first);
+        }
+        try {
+            const RNImage = (_metro.findByProps && (_metro.findByProps('prefetch', 'queryCache') || _metro.findByProps('resolveAssetSource'))) ||
+                            (_common.React && _common.React.Image);
+            if (RNImage && typeof RNImage.prefetch === 'function') {
+                RNImage.prefetch(url).catch(() => {});
+            } else if (typeof Image !== 'undefined' && typeof Image.prefetch === 'function') {
+                Image.prefetch(url).catch(() => {});
+            }
+        } catch (_) {}
+    }
+
+    function preloadMessagesMedia(messages, defer = false) {
+        if (!Array.isArray(messages) || !messages.length) return;
+        const task = () => {
+            for (const msg of messages) {
+                if (!msg) continue;
+                if (Array.isArray(msg.attachments)) {
+                    for (const att of msg.attachments) {
+                        const u = att.proxy_url || att.url;
+                        if (u) preloadMobileMedia(u);
+                    }
+                }
+                if (Array.isArray(msg.embeds)) {
+                    for (const emb of msg.embeds) {
+                        if (emb.image) preloadMobileMedia(emb.image.proxy_url || emb.image.url);
+                        if (emb.thumbnail) preloadMobileMedia(emb.thumbnail.proxy_url || emb.thumbnail.url);
+                    }
+                }
+                if (Array.isArray(msg.sticker_items)) {
+                    for (const stk of msg.sticker_items) {
+                        if (stk.id) preloadMobileMedia(`https://media.discordapp.net/stickers/${stk.id}.png?size=160`);
+                    }
+                }
+                if (typeof msg.content === 'string' && msg.content.includes('<')) {
+                    const matches = msg.content.matchAll(/<a?:[a-zA-Z0-9_]+:(\d+)>/g);
+                    for (const m of matches) {
+                        preloadMobileMedia(`https://cdn.discordapp.com/emojis/${m[1]}.webp?size=64&quality=lossless`);
+                    }
+                }
+            }
+        };
+        if (defer) {
+            setTimeout(task, 400);
+        } else {
+            task();
+        }
+    }
+
+
     // Bulletproof current user ID resolver with instantaneous O(1) caching
     let cachedCurrentUserId = null;
     function getCurrentUserId() {
@@ -134,7 +192,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'antigravity-active',
-                    content: 'Antigravity Master Suite v3.2.2 (1:1 Desktop Parity): ACTIVE'
+                    content: 'Antigravity Master Suite v3.2.3 (1:1 Desktop Parity): ACTIVE'
                 });
                 return;
             }
@@ -142,7 +200,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Antigravity Master Suite v3.2.2 (1:1 Desktop Parity): ACTIVE');
+                showToast('Antigravity Master Suite v3.2.3 (1:1 Desktop Parity): ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -671,7 +729,7 @@
             }
         } catch (_) {}
         try {
-            console.log('[MasterSuite Mobile v3.2.2] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
+            console.log('[MasterSuite Mobile v3.2.3] Starting Antigravity Master Suite (1:1 Desktop Parity)...');
 
             // Dynamic resolution refresh
             if (!_patcher || typeof _patcher.instead !== 'function') {
@@ -750,7 +808,7 @@
                 }
             } catch (_) {}
 
-            console.log(`[MasterSuite v3.2.2] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
+            console.log(`[MasterSuite v3.2.3] Active: Tracking ${blockedUserIdsSet.size} blocked, ${ignoredUserIdsSet.size} ignored users.`);
 
     // Gateway Member List Sanitizer: purges blocked users from Gateway SYNC ops and decrements group counts
     function sanitizeMemberListUpdate(event) {
@@ -1390,22 +1448,22 @@
             } catch (_) {}
 
             notifyActive();
-            console.log('[MasterSuite Mobile v3.2.2] Antigravity Master Suite loaded and active!');
+            console.log('[MasterSuite Mobile v3.2.3] Antigravity Master Suite loaded and active!');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.2.2 Error]', e);
+            console.error('[MasterSuite Mobile v3.2.3 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[MasterSuite Mobile v3.2.2] Stopping Antigravity Master Suite...');
+            console.log('[MasterSuite Mobile v3.2.3] Stopping Antigravity Master Suite...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[MasterSuite Mobile v3.2.2] Antigravity Master Suite stopped successfully.');
+            console.log('[MasterSuite Mobile v3.2.3] Antigravity Master Suite stopped successfully.');
         } catch (e) {
-            console.error('[MasterSuite Mobile v3.2.2 Error stopping]', e);
+            console.error('[MasterSuite Mobile v3.2.3 Error stopping]', e);
         }
     }
 
@@ -1413,7 +1471,7 @@
         name: 'Antigravity Master Suite',
         description: 'All-in-One: 1:1 Desktop-parity member list elimination (zero gap, index offset recalculation, exact header count), orphaned date divider removal, and dynamic relationship tracking.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '3.2.2',
+        version: '3.2.3',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
