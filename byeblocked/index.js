@@ -1,7 +1,7 @@
 /**
  * @name RemoveBlockedUsers
  * @description Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.
- * @version 1.8.2
+ * @version 1.8.3
  * @author Antigravity (Parity with DevilBro & nicola02nb)
  */
 (function(vendettaArg) {
@@ -17,8 +17,18 @@
                      (typeof window !== 'undefined' && window.revenge) ||
                      (typeof globalThis !== 'undefined' && (globalThis.revenge || _vendetta.revenge)) ||
                      {};
-    let _metro = _revenge.modules?.finders || _vendetta.metro || (typeof metro !== 'undefined' && metro) || {};
-    let _patcher = _revenge.patcher || _vendetta.patcher || (typeof patcher !== 'undefined' && patcher) || {};
+    let _metro = (typeof metro !== 'undefined' && metro) ||
+                 _vendetta.metro ||
+                 _revenge.modules?.finders ||
+                 globalThis.vendetta?.metro ||
+                 globalThis.revenge?.modules?.finders ||
+                 {};
+    let _patcher = (typeof patcher !== 'undefined' && patcher) ||
+                   _vendetta.patcher ||
+                   _revenge.patcher ||
+                   globalThis.vendetta?.patcher ||
+                   globalThis.revenge?.patcher ||
+                   {};
     let _common = _vendetta.metro?.common || (typeof metroCommon !== 'undefined' && metroCommon) || {};
     let _storage = _vendetta.plugin?.storage ||
                    _vendetta.storage ||
@@ -27,6 +37,41 @@
                    (typeof globalThis !== 'undefined' && (globalThis.__antigravity_storage = globalThis.__antigravity_storage || {})) ||
                    {};
     const unpatches = [];
+
+    // Universal Metro Finders across Vendetta, Revenge, and Bunny
+    function findByProps(...props) {
+        try {
+            if (_metro && typeof _metro.findByProps === 'function') return _metro.findByProps(...props);
+            if (_metro && typeof _metro.byProps === 'function') return _metro.byProps(...props);
+            if (_vendetta.metro && typeof _vendetta.metro.findByProps === 'function') return _vendetta.metro.findByProps(...props);
+            if (_revenge.modules?.finders && typeof _revenge.modules.finders.byProps === 'function') return _revenge.modules.finders.byProps(...props);
+            if (typeof vendetta !== 'undefined' && vendetta.metro?.findByProps) return vendetta.metro.findByProps(...props);
+            if (typeof revenge !== 'undefined' && revenge.modules?.finders?.byProps) return revenge.modules.finders.byProps(...props);
+            if (typeof bunny !== 'undefined' && bunny.metro?.findByProps) return bunny.metro.findByProps(...props);
+        } catch (_) {}
+        return null;
+    }
+
+    function findByName(name, defaultExp = true) {
+        try {
+            if (_metro && typeof _metro.findByName === 'function') return _metro.findByName(name, defaultExp);
+            if (_metro && typeof _metro.byName === 'function') return _metro.byName(name, defaultExp);
+            if (_vendetta.metro && typeof _vendetta.metro.findByName === 'function') return _vendetta.metro.findByName(name, defaultExp);
+            if (_revenge.modules?.finders && typeof _revenge.modules.finders.byName === 'function') return _revenge.modules.finders.byName(name, defaultExp);
+            if (typeof vendetta !== 'undefined' && vendetta.metro?.findByName) return vendetta.metro.findByName(name, defaultExp);
+            if (typeof revenge !== 'undefined' && revenge.modules?.finders?.byName) return revenge.modules.finders.byName(name, defaultExp);
+        } catch (_) {}
+        return null;
+    }
+
+    function findByStoreName(name) {
+        try {
+            if (_metro && typeof _metro.findByStoreName === 'function') return _metro.findByStoreName(name);
+            const found = findByProps(name);
+            if (found) return found;
+        } catch (_) {}
+        return null;
+    }
 
     // Bulletproof Universal Patcher
     function safePatch(type, obj, prop, hook) {
@@ -112,7 +157,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'RemoveBlockedUsers v1.8.2: ACTIVE'
+                    content: 'RemoveBlockedUsers v1.8.3: ACTIVE'
                 });
                 return;
             }
@@ -120,7 +165,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('RemoveBlockedUsers v1.8.2: ACTIVE');
+                showToast('RemoveBlockedUsers v1.8.3: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -140,6 +185,12 @@
     let TypingStore = null;
     let PresenceStore = null;
     let RowManager = null;
+
+    let rawIsBlocked = null;
+    let rawIsIgnored = null;
+    let rawGetRelationships = null;
+    let rawGetBlockedUserIds = null;
+    let rawGetPresenceStatus = null;
 
     let cachedCurrentUserId = null;
     function getCurrentUserId() {
@@ -182,18 +233,11 @@
         if (myId && s === myId) return false;
         if (blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s)) return true;
 
-        // Real-time store query fallback (guaranteed never empty)
+        // Direct store fallback
         try {
-            if (RelationshipStore) {
-                const sObj = RelationshipStore.default || RelationshipStore;
-                if (typeof sObj.isBlocked === 'function' && sObj.isBlocked(s)) {
-                    blockedUserIdsSet.add(s);
-                    return true;
-                }
-                if (typeof sObj.isIgnored === 'function' && sObj.isIgnored(s)) {
-                    ignoredUserIdsSet.add(s);
-                    return true;
-                }
+            if (rawIsBlocked) return rawIsBlocked.call(RelationshipStore, s);
+            if (RelationshipStore && typeof RelationshipStore.isBlocked === 'function') {
+                return RelationshipStore.isBlocked(s);
             }
         } catch (_) {}
         return false;
@@ -243,74 +287,43 @@
         return false;
     }
 
-    // Normalization handles ASCII and curly typographical apostrophes (' vs ’)
-    function normalizeSettingsText(str) {
-        if (typeof str !== 'string') return '';
-        return str
-            .replace(/[\u2018\u2019\u0060\u00B4]/g, "'")
-            .trim()
-            .toLowerCase();
-    }
-
-    const dynamicBlockedPhrases = new Set([
-        "accounts you've blocked or ignored",
-        "accounts you've blocked",
-        "blocked or ignored",
-        "blocked accounts",
-        "ignored accounts",
-        "blocked users",
-        "ignored users",
-        "you're in control",
-        "reducing unwanted interactions",
-        "explore our feature guide",
-        "feature guide"
-    ]);
-
-    function isSettingsBlockedString(str) {
-        if (typeof str !== 'string') return false;
-        const s = normalizeSettingsText(str);
-        if (!s) return false;
-
-        for (const phrase of dynamicBlockedPhrases) {
-            if (s.includes(phrase)) return true;
+    // Normalization handles ASCII and curly typographical apostrophes (' vs ’) with depth safeguard
+    function isSettingsBlockedSection(val, depth = 0) {
+        if (!val || depth > 5) return false;
+        if (typeof val === 'string') {
+            const lower = val.replace(/[\u2018\u2019\u0060\u00B4]/g, "'").trim().toLowerCase();
+            return lower.includes("accounts you've blocked or ignored") ||
+                   lower.includes("accounts you've blocked") ||
+                   lower.includes("blocked or ignored") ||
+                   lower.startsWith("blocked accounts") ||
+                   lower.startsWith("ignored accounts") ||
+                   lower === "blocked users" ||
+                   lower === "ignored users" ||
+                   lower.includes("you're in control") ||
+                   lower.includes("reducing unwanted interactions") ||
+                   lower.includes("feature guide") ||
+                   (lower === "blocked" && depth > 0);
         }
-        return s === "blocked" || s === "ignored";
-    }
-
-    function extractTextFromChildren(children) {
-        if (!children) return '';
-        if (typeof children === 'string') return children;
-        if (typeof children === 'number') return String(children);
-        if (Array.isArray(children)) {
-            return children.map(extractTextFromChildren).join(' ');
+        if (typeof val === 'object') {
+            for (const k of ['label', 'text', 'title', 'header', 'subLabel', 'sublabel', 'description', 'footer', 'helpText', 'note', 'accessibilityLabel', 'aria-label']) {
+                if (val[k] && isSettingsBlockedSection(val[k], depth + 1)) return true;
+            }
+            if (val.props && isSettingsBlockedSection(val.props, depth + 1)) return true;
+            if (typeof val.children === 'string' && isSettingsBlockedSection(val.children, depth + 1)) return true;
         }
-        if (typeof children === 'object' && children.props) {
-            return extractTextFromChildren(children.props.children);
-        }
-        return '';
-    }
-
-    function isSettingsBlockedProps(props) {
-        if (!props || typeof props !== 'object') return false;
-        const keysToCheck = [
-            'title', 'label', 'header', 'text', 'sectionTitle', 'titleText',
-            'subLabel', 'sublabel', 'description', 'footer', 'helpText', 'note',
-            'trailingText', 'accessibilityLabel', 'name', 'body'
-        ];
-        for (const k of keysToCheck) {
-            if (typeof props[k] === 'string' && isSettingsBlockedString(props[k])) return true;
-        }
-        const extracted = extractTextFromChildren(props.children);
-        if (extracted && isSettingsBlockedString(extracted)) return true;
         return false;
     }
 
-    function isDividerElement(c) {
-        if (!c) return false;
-        const name = c.type?.name || c.type?.displayName || (typeof c.type === 'string' ? c.type : '');
-        if (/divider|separator/i.test(name)) return true;
-        if (c.props && (/divider|separator/i.test(c.props.testID || '') || c.props.isDivider === true)) return true;
-        return false;
+    function renderEmptyRow() {
+        if (React && typeof React.createElement === 'function' && View) {
+            try {
+                return React.createElement(View, {
+                    style: { height: 0, width: 0, opacity: 0, overflow: 'hidden' },
+                    pointerEvents: 'none'
+                });
+            } catch (_) {}
+        }
+        return null;
     }
 
     function updateHeaderCount(headerItem, diff) {
@@ -437,95 +450,36 @@
     }
 
     function syncFromRelationshipStore() {
+        if (!RelationshipStore) return;
         try {
             let updated = false;
-            const stores = [
-                RelationshipStore,
-                RelationshipStore?.default,
-                _metro.findByProps?.('getRelationships', 'isBlocked'),
-                _metro.findByProps?.('getBlockedUserIds'),
-                _metro.find?.(m => (m?.getRelationships && m?.isBlocked) || (m?.default?.getRelationships && m?.default?.isBlocked))
-            ].filter(Boolean);
-
-            for (const s of stores) {
-                const candidate = s.default && typeof s.default.getRelationships === 'function' ? s.default : s;
-
-                // 1. getRelationships()
-                if (typeof candidate.getRelationships === 'function') {
-                    try {
-                        const rels = candidate.getRelationships();
-                        if (rels && typeof rels === 'object') {
-                            for (const uid in rels) {
-                                const val = rels[uid];
-                                const sUid = String(uid);
-                                if (val === 2 && !blockedUserIdsSet.has(sUid)) {
-                                    blockedUserIdsSet.add(sUid);
-                                    updated = true;
-                                }
-                                if (val === 5 && !ignoredUserIdsSet.has(sUid)) {
-                                    ignoredUserIdsSet.add(sUid);
-                                    updated = true;
-                                }
-                            }
-                        }
-                    } catch (_) {}
+            const rels = rawGetRelationships ? rawGetRelationships.call(RelationshipStore) : (typeof RelationshipStore.getRelationships === 'function' ? RelationshipStore.getRelationships() : null);
+            if (rels && typeof rels === 'object') {
+                for (const uid in rels) {
+                    const sUid = String(uid);
+                    if (rels[uid] === 2 && !blockedUserIdsSet.has(sUid)) {
+                        blockedUserIdsSet.add(sUid);
+                        updated = true;
+                    }
+                    if (rels[uid] === 5 && !ignoredUserIdsSet.has(sUid)) {
+                        ignoredUserIdsSet.add(sUid);
+                        updated = true;
+                    }
                 }
-
-                // 2. getBlockedUserIds()
-                if (typeof candidate.getBlockedUserIds === 'function') {
-                    try {
-                        const bIds = candidate.getBlockedUserIds();
-                        if (Array.isArray(bIds)) {
-                            for (const id of bIds) {
-                                const sId = String(id);
-                                if (!blockedUserIdsSet.has(sId)) {
-                                    blockedUserIdsSet.add(sId);
-                                    updated = true;
-                                }
-                            }
-                        }
-                    } catch (_) {}
-                }
-
-                // 3. getIgnoredUserIds()
-                if (typeof candidate.getIgnoredUserIds === 'function') {
-                    try {
-                        const iIds = candidate.getIgnoredUserIds();
-                        if (Array.isArray(iIds)) {
-                            for (const id of iIds) {
-                                const sId = String(id);
-                                if (!ignoredUserIdsSet.has(sId)) {
-                                    ignoredUserIdsSet.add(sId);
-                                    updated = true;
-                                }
-                            }
-                        }
-                    } catch (_) {}
-                }
-
-                // 4. Internal properties
-                try {
-                    const rawObj = candidate._relationships || candidate.relationships;
-                    if (rawObj && typeof rawObj === 'object') {
-                        for (const uid in rawObj) {
-                            const val = rawObj[uid];
-                            const sUid = String(uid);
-                            if (val === 2 && !blockedUserIdsSet.has(sUid)) {
-                                blockedUserIdsSet.add(sUid);
-                                updated = true;
-                            }
-                            if (val === 5 && !ignoredUserIdsSet.has(sUid)) {
-                                ignoredUserIdsSet.add(sUid);
-                                updated = true;
-                            }
+            }
+            if (rawGetBlockedUserIds) {
+                const bIds = rawGetBlockedUserIds.call(RelationshipStore);
+                if (Array.isArray(bIds)) {
+                    for (const id of bIds) {
+                        const sId = String(id);
+                        if (!blockedUserIdsSet.has(sId)) {
+                            blockedUserIdsSet.add(sId);
+                            updated = true;
                         }
                     }
-                } catch (_) {}
+                }
             }
-
-            if (updated) {
-                persistBlockedSets();
-            }
+            if (updated) persistBlockedSets();
         } catch (_) {}
     }
 
@@ -782,7 +736,7 @@
         }
 
         try {
-            const ChatModule = _metro.findByProps('updateRows');
+            const ChatModule = findByProps('updateRows');
             if (ChatModule && typeof ChatModule.updateRows === 'function') {
                 safePatch('before', ChatModule, 'updateRows', function(args) {
                     for (let i = 0; i < args.length; i++) {
@@ -809,11 +763,11 @@
         try {
             const memberRowNames = ['MemberListItem', 'GuildMemberRow', 'ChannelMemberRow', 'MemberRow', 'GuildMemberListItem'];
             for (const name of memberRowNames) {
-                const holder = _metro.findByProps && _metro.findByProps(name);
+                const holder = findByProps(name);
                 if (holder && typeof holder[name] === 'function') {
                     safePatch('instead', holder, name, function(args, orig) {
                         const props = args[0];
-                        if (isMemberBlockedOrIgnored(props)) return null;
+                        if (isMemberBlockedOrIgnored(props)) return renderEmptyRow();
                         return orig ? orig.apply(this, args) : null;
                     });
                 }
@@ -822,96 +776,89 @@
     }
 
     function startPlugin() {
-        console.log('[RemoveBlockedUsers v1.8.2] Initializing...');
-
-        // 1. Resolve APIs safely
         try {
+            console.log('[RemoveBlockedUsers v1.8.3] Initializing...');
+
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
-                           _revenge.patcher ||
                            _vendetta.patcher ||
+                           _revenge.patcher ||
                            globalThis.vendetta?.patcher ||
                            globalThis.revenge?.patcher ||
                            _patcher;
             }
-            if (!_metro || typeof _metro.findByProps !== 'function') {
+            if (!_metro) {
                 _metro = (typeof metro !== 'undefined' && metro) ||
-                          _revenge.modules?.finders ||
                           _vendetta.metro ||
+                          _revenge.modules?.finders ||
                           globalThis.vendetta?.metro ||
                           globalThis.revenge?.modules?.finders ||
-                          _metro;
+                          {};
             }
             if (!_FluxDispatcher) {
                 _FluxDispatcher = _revenge.discord?.flux?.Dispatcher ||
                                   _revenge.discord?.flux?.FluxDispatcher ||
                                   _common.FluxDispatcher ||
-                                  (_metro.findByProps && (_metro.findByProps('dispatch', 'subscribe') || _metro.findByProps('dispatch')));
+                                  findByProps('dispatch', 'subscribe') ||
+                                  findByProps('dispatch');
             }
-        } catch (e) {
-            console.error('[RemoveBlockedUsers API Resolution Error]', e);
-        }
 
-        // 2. Resolve Stores & Modules safely
-        try {
-            if (_metro.findByProps) {
-                RelationshipStore = (_metro.findByProps && _metro.findByProps('getRelationships', 'isBlocked')) ||
-                                    (_metro.find && _metro.find(m => (m?.getRelationships && m?.isBlocked) || (m?.default?.getRelationships && m?.default?.isBlocked))) ||
-                                    _metro.findByProps('isBlocked') ||
-                                    _metro.findByProps('getRelationships');
-                GuildMemberStore = _metro.findByProps('getMember', 'getMembers');
-                ChannelMemberStore = _metro.findByProps('getProps', 'getRows');
-                MemberListStore = _metro.findByProps('getMemberListSections') ||
-                                  _metro.findByProps('getRows', 'getGroups');
-                MessageStore = _metro.findByProps('getMessages', 'getMessage');
-                UserStore = _metro.findByProps('getUser', 'getUsers');
-                TypingStore = _metro.findByProps('getTypingUsers');
-                PresenceStore = _metro.findByProps('getState', 'getStatus') ||
-                                _metro.findByProps('getStatus');
-                RowManager = _metro.findByProps('RowManager')?.RowManager ||
-                             (_metro.findByName && _metro.findByName('RowManager'));
-                if (!React) {
-                    React = (typeof globalThis !== 'undefined' && globalThis.React) ||
-                            _common.React ||
-                            _metro.findByProps('createElement', 'Component') ||
-                            _metro.findByProps('createElement');
-                }
-                if (!View) {
-                    View = _metro.findByProps('View')?.View || (typeof uiComponents !== 'undefined' && uiComponents.View);
-                }
+            RelationshipStore = findByProps('getRelationships', 'isBlocked') ||
+                                findByProps('isBlocked') ||
+                                findByProps('getRelationships');
+            GuildMemberStore = findByProps('getMember', 'getMembers');
+            ChannelMemberStore = findByProps('getProps', 'getRows') ||
+                                 findByStoreName('ChannelMemberStore') ||
+                                 findByStoreName('ChannelMembersStore');
+            MemberListStore = findByProps('getMemberListSections') ||
+                              findByProps('getRows', 'getGroups') ||
+                              findByStoreName('GuildMemberListStore') ||
+                              findByStoreName('ChannelMemberListStore');
+            MessageStore = findByProps('getMessages', 'getMessage');
+            UserStore = findByProps('getUser', 'getUsers');
+            TypingStore = findByProps('getTypingUsers');
+            PresenceStore = findByProps('getState', 'getStatus') || findByProps('getStatus');
+            RowManager = findByProps('RowManager')?.RowManager || findByName('RowManager');
+            if (!React) {
+                React = (typeof globalThis !== 'undefined' && globalThis.React) ||
+                        _common.React ||
+                        findByProps('createElement', 'Component') ||
+                        findByProps('createElement');
             }
-        } catch (e) {
-            console.error('[RemoveBlockedUsers Store Resolution Error]', e);
-        }
+            if (!View) {
+                View = findByProps('View')?.View || (typeof uiComponents !== 'undefined' && uiComponents.View);
+            }
 
-        // 3. Sync relationship store data into memory sets FIRST
-        try {
-            syncFromRelationshipStore();
-        } catch (e) {
-            console.error('[RemoveBlockedUsers Sync Error]', e);
-        }
+            if (RelationshipStore) {
+                rawIsBlocked = RelationshipStore.isBlocked;
+                rawIsIgnored = RelationshipStore.isIgnored;
+                rawGetRelationships = RelationshipStore.getRelationships;
+                rawGetBlockedUserIds = RelationshipStore.getBlockedUserIds;
+                syncFromRelationshipStore();
+            }
+            if (PresenceStore) {
+                rawGetPresenceStatus = PresenceStore.getStatus;
+            }
 
-        // 4. Apply features with fail-safe boundaries
         try { applyRemoveBlockedUsers(); } catch (err) { console.error('[applyRemoveBlockedUsers Error]', err); }
 
-        // 5. Visual Notification
-        try {
             notifyActive();
-        } catch (_) {}
-
-        console.log('[RemoveBlockedUsers v1.8.2] Loaded and active successfully.');
+            console.log('[RemoveBlockedUsers v1.8.3] Loaded and active successfully.');
+        } catch (e) {
+            console.error('[RemoveBlockedUsers v1.8.3 Error]', e);
+        }
     }
 
     function stopPlugin() {
         try {
-            console.log('[RemoveBlockedUsers v1.8.2] Stopping...');
+            console.log('[RemoveBlockedUsers v1.8.3] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[RemoveBlockedUsers v1.8.2] Stopped cleanly.');
+            console.log('[RemoveBlockedUsers v1.8.3] Stopped cleanly.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.2 Error stopping]', e);
+            console.error('[RemoveBlockedUsers v1.8.3 Error stopping]', e);
         }
     }
 
@@ -919,12 +866,28 @@
         name: 'RemoveBlockedUsers',
         description: 'Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.8.2',
+        version: '1.8.3',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
         onUnload: stopPlugin
     };
+
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = pluginExport;
+        module.exports.default = pluginExport;
+        module.exports.start = startPlugin;
+        module.exports.stop = stopPlugin;
+        module.exports.onLoad = startPlugin;
+        module.exports.onUnload = stopPlugin;
+    }
+    if (typeof exports !== 'undefined') {
+        exports.default = pluginExport;
+        exports.start = startPlugin;
+        exports.stop = stopPlugin;
+        exports.onLoad = startPlugin;
+        exports.onUnload = stopPlugin;
+    }
 
     return {
         default: pluginExport,
