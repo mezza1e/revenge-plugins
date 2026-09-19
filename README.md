@@ -1,4 +1,4 @@
-# Revengecord Plugins by mezza1e (v4.5.0)
+# Revengecord Plugins by mezza1e (v4.5.1)
 
 Clean, high-performance mobile ports of essential Discord desktop plugins for **Revengecord / Vendetta / Bunny**.
 
@@ -16,7 +16,7 @@ In Revengecord mobile app:
 3. Tap **Install Plugin** (+) and paste:
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.0/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/
 ```
 
 *(Alternative GitHub Pages URL: `https://mezza1e.github.io/revenge-plugins/`)*
@@ -40,7 +40,7 @@ If you prefer installing each feature as an independent plugin matching your des
 * Supports React.forwardRef and React.memo component patching.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.0/hideblockedinsettings/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/hideblockedinsettings/
 ```
 
 ---
@@ -55,7 +55,7 @@ https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.0/hideblockedinsettings/
 * Suppresses typing indicators and presence.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.0/removeblockedusers/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/removeblockedusers/
 ```
 
 ---
@@ -66,5 +66,5 @@ https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.0/removeblockedusers/
 * Suppresses the warning popup when a blocked or ignored user joins your active voice channel.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.0/bypassblockedorignored/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/bypassblockedorignored/
 ```
