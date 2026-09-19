@@ -1,4 +1,4 @@
-# Revengecord Plugins by mezza1e (v4.5.3)
+# Revengecord Plugins by mezza1e (v4.6.0)
 
 Clean, high-performance mobile ports of essential Discord desktop plugins for **Revengecord / Vendetta / Bunny**.
 
@@ -16,7 +16,7 @@ In Revengecord mobile app:
 3. Tap **Install Plugin** (+) and paste:
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.3/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.6.0/
 ```
 
 *(Alternative GitHub Pages URL: `https://mezza1e.github.io/revenge-plugins/`)*
@@ -31,7 +31,7 @@ https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.3/
 
 If you prefer installing each feature as an independent plugin matching your desktop setup:
 
-### 1. HideBlockedInSettings (v1.5.5)
+### 1. HideBlockedInSettings (v1.6.0)
 *Parity with Antigravity's HideBlockedInSettings*
 * Hides "Accounts you've blocked or ignored" section header from **Content & Social** settings.
 * Hides "Blocked accounts" and "Ignored accounts" rows.
@@ -40,12 +40,12 @@ If you prefer installing each feature as an independent plugin matching your des
 * Supports React.forwardRef, React.memo, and nested wrapper component patching.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.3/hideblockedinsettings/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.6.0/hideblockedinsettings/
 ```
 
 ---
 
-### 2. RemoveBlockedUsers (v1.8.6)
+### 2. RemoveBlockedUsers (v1.9.0)
 *Parity with DevilBro's RemoveBlockedUsers*
 * Removes blocked & ignored messages completely from chat.
 * Eliminates the collapsed "X blocked messages" bar.
@@ -55,16 +55,16 @@ https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.3/hideblockedinsettings/
 * Suppresses typing indicators and presence.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.3/removeblockedusers/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.6.0/removeblockedusers/
 ```
 
 ---
 
-### 3. BypassBlockedOrIgnored (v1.0.17)
+### 3. BypassBlockedOrIgnored (v1.1.0)
 *Parity with nicola02nb's BypassBlockedOrIgnored*
 * Bypasses the blocked/ignored user confirmation warning modal when joining a voice channel.
 * Suppresses the warning popup when a blocked or ignored user joins your active voice channel.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.3/bypassblockedorignored/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.6.0/bypassblockedorignored/
 ```

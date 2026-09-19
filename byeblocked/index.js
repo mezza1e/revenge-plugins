@@ -2,8 +2,8 @@
     'use strict';
     /**
      * @name RemoveBlockedUsers
-     * @description Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.
-     * @version 1.8.6
+     * @description DevilBro RemoveBlockedUsers mobile port. Removes blocked and ignored messages, strips collapsed bars, prunes orphaned date dividers, filters playerlist, and hides typing.
+     * @version 1.9.0
      * @author Antigravity (Parity with DevilBro & nicola02nb)
      */
 
@@ -58,6 +58,8 @@
     function findByStoreName(name) {
         try {
             if (_metro && typeof _metro.findByStoreName === 'function') return _metro.findByStoreName(name);
+            if (_vendetta.metro && typeof _vendetta.metro.findByStoreName === 'function') return _vendetta.metro.findByStoreName(name);
+            if (_revenge.modules?.finders && typeof _revenge.modules.finders.byStoreName === 'function') return _revenge.modules.finders.byStoreName(name);
             const found = findByProps(name);
             if (found) return found;
         } catch (_) {}
@@ -186,16 +188,18 @@
         }
     }
 
-    let _FluxDispatcher = null;
-    let React = null;
+    let React = (typeof window !== 'undefined' && window.React) ||
+                (typeof globalThis !== 'undefined' && globalThis.React) ||
+                _common.React;
     let View = null;
+    let _FluxDispatcher = null;
 
     function notifyActive() {
         try {
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'RemoveBlockedUsers v1.8.6: ACTIVE'
+                    content: 'Revengecord Plugin Suite v1.9.0: ACTIVE'
                 });
                 return;
             }
@@ -203,10 +207,11 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('RemoveBlockedUsers v1.8.6: ACTIVE');
+                showToast('Revengecord Plugin Suite v1.9.0: ACTIVE');
                 return;
             }
         } catch (_) {}
+        console.log('[Revengecord Plugin Suite v1.9.0] ACTIVE and loaded successfully');
     }
 
     const blockedUserIdsSet = new Set();
@@ -338,6 +343,8 @@
                    lower.includes("blocked or ignored") ||
                    lower.startsWith("blocked accounts") ||
                    lower.startsWith("ignored accounts") ||
+                   lower === "blocked accounts" ||
+                   lower === "ignored accounts" ||
                    lower === "blocked users" ||
                    lower === "ignored users" ||
                    lower.includes("you're in control") ||
@@ -417,9 +424,9 @@
 
     function isDividerRow(r) {
         if (!r || typeof r !== 'object') return false;
-        if (r.type === 3 || r.rowType === 3 || r.type === 'DIVIDER' || r.type === 'DATE' || r.isDivider === true) return true;
-        if (typeof r.id === 'string' && (r.id.startsWith('divider') || r.id.startsWith('date'))) return true;
-        if (r.date != null && !r.message && !r.author && !r.content) return true;
+        if (r.type === 3 || r.rowType === 3 || r.itemType === 3 || r.type === 'DIVIDER' || r.type === 'DATE' || r.type === 'SEPARATOR' || r.isDivider === true) return true;
+        if (typeof r.id === 'string' && (r.id.startsWith('divider') || r.id.startsWith('date') || r.id.startsWith('timestamp'))) return true;
+        if ((r.date != null || r.timestamp != null) && !r.message && !r.author && !r.content) return true;
         return false;
     }
 
@@ -427,29 +434,49 @@
         if (!r || typeof r !== 'object') return false;
         if (isDividerRow(r)) return false;
         if (r.type === 2 || r.rowType === 2 || r.hidden === true) return false;
-        if (r.message && (isBlockedOrIgnored(r.message.author?.id) || blockedMessageIdsSet.has(String(r.message.id)))) return false;
-        if (r.item && (isBlockedOrIgnored(r.item.author?.id) || blockedMessageIdsSet.has(String(r.item.id)))) return false;
+        const authorId = r.message?.author?.id || r.item?.author?.id || r.author?.id;
+        const msgId = r.message?.id || r.item?.id || r.id;
+        if (isBlockedOrIgnored(authorId) || blockedMessageIdsSet.has(String(msgId))) return false;
         return !!(r.message || r.item || r.author || r.content || r.type === 0 || r.type === 'MESSAGE');
     }
 
+    // Bidirectional Orphaned Date Divider Pruning
     function pruneOrphanedDateDividers(rows) {
         if (!Array.isArray(rows) || rows.length === 0) return rows;
-        const result = [];
-        let pendingDivider = null;
 
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            if (!row || typeof row !== 'object') continue;
+        // 1. Filter out all blocked messages and collapsed blocked bars first
+        const clean = rows.filter(r => {
+            if (!r || typeof r !== 'object') return false;
+            if (r.type === 2 || r.rowType === 2 || r.hidden === true) return false;
+            const authorId = r.message?.author?.id || r.item?.author?.id || r.author?.id;
+            const msgId = r.message?.id || r.item?.id || r.id;
+            if (isBlockedOrIgnored(authorId) || blockedMessageIdsSet.has(String(msgId))) return false;
+            return true;
+        });
+
+        // 2. Bidirectional check: A date divider is only retained if there is at least one unblocked message associated with it
+        const result = [];
+        for (let i = 0; i < clean.length; i++) {
+            const row = clean[i];
             if (isDividerRow(row)) {
-                pendingDivider = row;
-            } else if (isMessageRow(row)) {
-                if (pendingDivider) {
-                    if (result.length === 0 || !isDividerRow(result[result.length - 1])) {
-                        result.push(pendingDivider);
-                    }
-                    pendingDivider = null;
+                let hasMessage = false;
+                // Forward check
+                for (let j = i + 1; j < clean.length; j++) {
+                    if (isMessageRow(clean[j])) { hasMessage = true; break; }
+                    if (isDividerRow(clean[j])) { break; }
                 }
-                result.push(row);
+                // Backward check (for inverted virtualized chat FlatLists)
+                if (!hasMessage) {
+                    for (let j = i - 1; j >= 0; j--) {
+                        if (isMessageRow(clean[j])) { hasMessage = true; break; }
+                        if (isDividerRow(clean[j])) { break; }
+                    }
+                }
+                if (hasMessage) {
+                    if (result.length === 0 || !isDividerRow(result[result.length - 1])) {
+                        result.push(row);
+                    }
+                }
             } else {
                 result.push(row);
             }
@@ -462,7 +489,7 @@
         const temp = [];
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            if (!row || typeof row !== 'object' || row.type == null) continue;
+            if (!row || typeof row !== 'object') continue;
             if (row.type === 2 || row.rowType === 2 || row.hidden === true) continue;
             if (row.message) {
                 const authorId = row.message.author?.id || row.author?.id;
@@ -613,7 +640,7 @@
     function applyRemoveBlockedUsers() {
         if (!true) return;
 
-        // A. FluxDispatcher: Chat Message Filtering & Realtime Relationship Sync
+        // A. FluxDispatcher: Chat Messages & Gateway Member List Updates
         if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
             safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
                 const event = args[0];
@@ -647,8 +674,49 @@
                             }
                         }
 
-                        // Filter incoming messages
-                        if (event.type === 'LOAD_MESSAGES_SUCCESS' && Array.isArray(event.messages)) {
+                        // 1. Gateway Member List Interception (Playerlist)
+                        if (event.type === 'GUILD_MEMBER_LIST_UPDATE' && Array.isArray(event.ops)) {
+                            for (let i = 0; i < event.ops.length; i++) {
+                                const op = event.ops[i];
+                                if (!op) continue;
+                                if (op.op === 'SYNC' && Array.isArray(op.items)) {
+                                    const newItems = [];
+                                    let currentGroup = null;
+                                    for (const it of op.items) {
+                                        if (it.group) {
+                                            currentGroup = it.group;
+                                            newItems.push(it);
+                                        } else if (it.member) {
+                                            if (isMemberBlockedOrIgnored(it.member)) {
+                                                if (currentGroup && typeof currentGroup.count === 'number') {
+                                                    currentGroup.count = Math.max(0, currentGroup.count - 1);
+                                                }
+                                            } else {
+                                                newItems.push(it);
+                                            }
+                                        } else {
+                                            newItems.push(it);
+                                        }
+                                    }
+                                    op.items = newItems;
+                                }
+                                if ((op.op === 'INSERT' || op.op === 'UPDATE') && op.item?.member) {
+                                    if (isMemberBlockedOrIgnored(op.item.member)) {
+                                        event.ops.splice(i, 1);
+                                        i--;
+                                    }
+                                }
+                            }
+                        }
+                        if (event.type === 'GUILD_MEMBERS_CHUNK' && Array.isArray(event.members)) {
+                            event.members = event.members.filter(m => !isMemberBlockedOrIgnored(m));
+                        }
+                        if (event.type === 'THREAD_MEMBER_LIST_UPDATE' && Array.isArray(event.members)) {
+                            event.members = event.members.filter(m => !isMemberBlockedOrIgnored(m));
+                        }
+
+                        // 2. Message Interception across all load types
+                        if ((event.type === 'LOAD_MESSAGES_SUCCESS' || event.type === 'LOCAL_MESSAGES_LOADED' || event.type === 'SEARCH_MESSAGES_SUCCESS') && Array.isArray(event.messages)) {
                             event.messages = event.messages.filter(msg => {
                                 if (!msg) return false;
                                 if (isBlockedOrIgnored(msg.author?.id)) {
@@ -728,7 +796,7 @@
             }
         }
 
-        // D. GuildMemberStore
+        // D. GuildMemberStore (Array, Object, and Map safe)
         if (GuildMemberStore) {
             if (typeof GuildMemberStore.getMember === 'function') {
                 safePatch('instead', GuildMemberStore, 'getMember', function(args, orig) {
@@ -742,15 +810,28 @@
                 });
             }
             if (typeof GuildMemberStore.getMembers === 'function') {
-                safePatch('instead', GuildMemberStore, 'getMembers', function(args, orig) {
-                    const res = orig ? orig.apply(this, args) : [];
-                    if (!Array.isArray(res)) return res;
-                    return res.filter(m => !isMemberBlockedOrIgnored(m));
+                safePatch('after', GuildMemberStore, 'getMembers', function(args, res) {
+                    if (!res) return res;
+                    if (Array.isArray(res)) return res.filter(m => !isMemberBlockedOrIgnored(m));
+                    if (res instanceof Map) {
+                        const filteredMap = new Map();
+                        for (const [k, v] of res.entries()) {
+                            if (!isBlockedOrIgnored(k) && !isMemberBlockedOrIgnored(v)) filteredMap.set(k, v);
+                        }
+                        return filteredMap;
+                    }
+                    if (typeof res === 'object') {
+                        const filteredObj = {};
+                        for (const k in res) {
+                            if (!isBlockedOrIgnored(k) && !isMemberBlockedOrIgnored(res[k])) filteredObj[k] = res[k];
+                        }
+                        return filteredObj;
+                    }
+                    return res;
                 });
             }
             if (typeof GuildMemberStore.getMemberIds === 'function') {
-                safePatch('instead', GuildMemberStore, 'getMemberIds', function(args, orig) {
-                    const res = orig ? orig.apply(this, args) : [];
+                safePatch('after', GuildMemberStore, 'getMemberIds', function(args, res) {
                     if (!Array.isArray(res)) return res;
                     return res.filter(id => !isBlockedOrIgnored(id));
                 });
@@ -783,15 +864,37 @@
             }
         }
 
-        // F. MessageStore
-        if (MessageStore && typeof MessageStore.getMessage === 'function') {
-            safePatch('after', MessageStore, 'getMessage', function(args, res) {
-                if (res) sanitizeMessage(res);
-                return res;
-            });
+        // F. MessageStore (Messages & Message Filtering)
+        if (MessageStore) {
+            if (typeof MessageStore.getMessages === 'function') {
+                safePatch('after', MessageStore, 'getMessages', function(args, res) {
+                    if (!res) return res;
+                    try {
+                        if (Array.isArray(res)) {
+                            return res.filter(m => m && !isBlockedOrIgnored(m.author?.id));
+                        }
+                        if (Array.isArray(res._array)) {
+                            res._array = res._array.filter(m => m && !isBlockedOrIgnored(m.author?.id));
+                        }
+                        if (typeof res.filter === 'function') {
+                            return res.filter(m => m && !isBlockedOrIgnored(m.author?.id));
+                        }
+                    } catch (_) {}
+                    return res;
+                });
+            }
+            if (typeof MessageStore.getMessage === 'function') {
+                safePatch('after', MessageStore, 'getMessage', function(args, res) {
+                    if (res) {
+                        if (isBlockedOrIgnored(res.author?.id) || blockedMessageIdsSet.has(String(res.id))) return null;
+                        sanitizeMessage(res);
+                    }
+                    return res;
+                });
+            }
         }
 
-        // G. RowManager: Chat Row Elimination
+        // G. RowManager: Chat Row Elimination & Date Divider Pruning
         if (RowManager && RowManager.prototype) {
             safePatch('before', RowManager.prototype, 'generate', function(args) {
                 const data = args[0];
@@ -892,7 +995,7 @@
 
         // I. Direct Member & Blocked Row Component Hooks
         try {
-            const memberRowNames = ['MemberListItem', 'GuildMemberRow', 'ChannelMemberRow', 'MemberRow', 'GuildMemberListItem'];
+            const memberRowNames = ['MemberListItem', 'GuildMemberRow', 'ChannelMemberRow', 'MemberRow', 'GuildMemberListItem', 'ChannelMembers', 'MemberList'];
             for (const name of memberRowNames) {
                 const holder = findByProps(name);
                 if (holder) {
@@ -981,7 +1084,25 @@
             }
         }
 
-        // B. Native Settings Form Components (TableRow, TableSection, TableRowGroup, FormRow, FormSection)
+        // B. Native Settings Form Components & Fast React.createElement Guard
+        try {
+            if (React && typeof React.createElement === 'function') {
+                const origCreateElement = React.createElement;
+                safePatch('instead', React, 'createElement', function(args, orig) {
+                    const props = args[1];
+                    if (props && isSettingsBlockedSection(props)) {
+                        return renderEmptyRow();
+                    }
+                    if (args.length > 2) {
+                        for (let c = 2; c < args.length; c++) {
+                            if (isSettingsBlockedSection(args[c])) return renderEmptyRow();
+                        }
+                    }
+                    return orig ? orig.apply(this, args) : origCreateElement.apply(this, args);
+                });
+            }
+        } catch (_) {}
+
         try {
             const settingsTargetMods = new Set();
             if (_vendetta.ui?.components?.Forms) settingsTargetMods.add(_vendetta.ui.components.Forms);
@@ -992,7 +1113,7 @@
                 'TableSwitchRow', 'TableRadioRow', 'TableCheckboxRow',
                 'FormRow', 'FormSection', 'FormHelpText', 'FormNotice', 'FormLabel', 'FormTitle',
                 'FormSectionTitle', 'TableSectionHeader', 'SettingsSection', 'SettingsRow',
-                'SettingsRowGroup', 'SettingsNotice', 'SettingsHelpText'
+                'SettingsRowGroup', 'SettingsNotice', 'SettingsHelpText', 'Card'
             ];
             for (const p of formKeys) {
                 const m = findByProps(p);
@@ -1055,57 +1176,56 @@
     function applyBypassBlockedOrIgnored() {
         if (!false) return;
         try {
-            // A. Bypass warning modal when connecting to voice
             const voiceMod = findByProps('handleVoiceConnect');
             if (voiceMod && typeof voiceMod.handleVoiceConnect === 'function') {
                 safePatch('before', voiceMod, 'handleVoiceConnect', function(args) {
+                    if (args && args[0] && typeof args[0] === 'object') {
+                        args[0].bypassBlockedWarningModal = true;
+                        args[0].bypassBlocked = true;
+                        args[0].bypassWarning = true;
+                    }
+                });
+            }
+
+            const voiceActionCreators = findByProps('selectVoiceChannel');
+            if (voiceActionCreators && typeof voiceActionCreators.selectVoiceChannel === 'function') {
+                safePatch('before', voiceActionCreators, 'selectVoiceChannel', function(args) {
+                    if (args && args[1] && typeof args[1] === 'object') {
+                        args[1].bypassBlockedWarningModal = true;
+                    }
+                });
+            }
+
+            const modalModule = findByProps('openModal', 'openModalLazy');
+            if (modalModule && typeof modalModule.openModalLazy === 'function') {
+                safePatch('instead', modalModule, 'openModalLazy', function(args, orig) {
                     try {
-                        if (args[0] && typeof args[0] === 'object') {
-                            args[0].bypassBlockedWarningModal = true;
+                        const factory = args[0];
+                        if (typeof factory === 'function') {
+                            const str = factory.toString();
+                            if (str.includes('BlockedUser') || str.includes('VoiceChannelBlocked') || str.includes('BlockedVoice')) {
+                                return Promise.resolve();
+                            }
                         }
                     } catch (_) {}
+                    return orig ? orig.apply(this, args) : null;
                 });
             }
-
-            // B. Force channel blocked/ignored sets to return empty sets
-            const boiHelpers = findByProps('getBlockedUsersForVoiceChannel', 'getIgnoredUsersForVoiceChannel');
-            if (boiHelpers) {
-                if (typeof boiHelpers.getBlockedUsersForVoiceChannel === 'function') {
-                    safePatch('instead', boiHelpers, 'getBlockedUsersForVoiceChannel', function() {
-                        return new Set();
-                    });
-                }
-                if (typeof boiHelpers.getIgnoredUsersForVoiceChannel === 'function') {
-                    safePatch('instead', boiHelpers, 'getIgnoredUsersForVoiceChannel', function() {
-                        return new Set();
-                    });
-                }
-            }
-
-            // C. Suppress modal when a blocked or ignored user joins your voice channel
-            const boiJoin = findByProps('handleBlockedOrIgnoredUserVoiceChannelJoin');
-            if (boiJoin && typeof boiJoin.handleBlockedOrIgnoredUserVoiceChannelJoin === 'function') {
-                safePatch('instead', boiJoin, 'handleBlockedOrIgnoredUserVoiceChannelJoin', function() {
-                    return;
-                });
-            }
-        } catch (e) {
-            console.error('[BypassBlockedOrIgnored Error]', e);
-        }
+        } catch (_) {}
     }
 
     // =========================================================================
-    // Plugin Lifecycle
+    // Plugin Lifecycle Management
     // =========================================================================
     function startPlugin() {
         if (isStarted) {
-            console.log('[RemoveBlockedUsers v1.8.6] Already started, ignoring duplicate call.');
+            console.log('[Revengecord Plugin Suite v1.9.0] Already started, ignoring duplicate call.');
             return;
         }
         isStarted = true;
 
         try {
-            console.log('[RemoveBlockedUsers v1.8.6] Initializing...');
+            console.log('[Revengecord Plugin Suite v1.9.0] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -1127,25 +1247,27 @@
                 _FluxDispatcher = _revenge.discord?.flux?.Dispatcher ||
                                   _revenge.discord?.flux?.FluxDispatcher ||
                                   _common.FluxDispatcher ||
+                                  findByStoreName('FluxDispatcher') ||
                                   findByProps('dispatch', 'subscribe') ||
                                   findByProps('dispatch');
             }
 
-            RelationshipStore = findByProps('getRelationships', 'isBlocked') ||
+            RelationshipStore = findByStoreName('RelationshipStore') ||
+                                findByProps('getRelationships', 'isBlocked') ||
                                 findByProps('isBlocked') ||
                                 findByProps('getRelationships');
-            GuildMemberStore = findByProps('getMember', 'getMembers');
-            ChannelMemberStore = findByProps('getProps', 'getRows') ||
-                                 findByStoreName('ChannelMemberStore') ||
-                                 findByStoreName('ChannelMembersStore');
-            MemberListStore = findByProps('getMemberListSections') ||
-                              findByProps('getRows', 'getGroups') ||
-                              findByStoreName('GuildMemberListStore') ||
-                              findByStoreName('ChannelMemberListStore');
-            MessageStore = findByProps('getMessages', 'getMessage');
-            UserStore = findByProps('getUser', 'getUsers');
-            TypingStore = findByProps('getTypingUsers');
-            PresenceStore = findByProps('getState', 'getStatus') || findByProps('getStatus');
+            GuildMemberStore = findByStoreName('GuildMemberStore') || findByProps('getMember', 'getMembers');
+            ChannelMemberStore = findByStoreName('ChannelMemberStore') ||
+                                 findByStoreName('ChannelMembersStore') ||
+                                 findByProps('getProps', 'getRows');
+            MemberListStore = findByStoreName('GuildMemberListStore') ||
+                              findByStoreName('ChannelMemberListStore') ||
+                              findByProps('getMemberListSections') ||
+                              findByProps('getRows', 'getGroups');
+            MessageStore = findByStoreName('MessageStore') || findByProps('getMessages', 'getMessage');
+            UserStore = findByStoreName('UserStore') || findByProps('getUser', 'getUsers');
+            TypingStore = findByStoreName('TypingStore') || findByProps('getTypingUsers');
+            PresenceStore = findByStoreName('PresenceStore') || findByProps('getState', 'getStatus') || findByProps('getStatus');
             RowManager = findByProps('RowManager')?.RowManager || findByName('RowManager');
             if (!React) {
                 React = (typeof globalThis !== 'undefined' && globalThis.React) ||
@@ -1180,10 +1302,22 @@
             try { applyHideBlockedInSettings(); } catch (err) { console.error('[applyHideBlockedInSettings Error]', err); }
             try { applyBypassBlockedOrIgnored(); } catch (err) { console.error('[applyBypassBlockedOrIgnored Error]', err); }
 
+            // Periodic sync check to catch delayed network relationship loading on cold app boots
+            let syncAttempts = 0;
+            const syncInterval = setInterval(() => {
+                syncAttempts++;
+                syncFromRelationshipStore();
+                if (syncAttempts > 6 || (blockedUserIdsSet.size > 0 && ignoredUserIdsSet.size > 0)) {
+                    clearInterval(syncInterval);
+                }
+            }, 2500);
+            try { syncInterval.unref?.(); } catch (_) {}
+            unpatches.push(() => clearInterval(syncInterval));
+
             notifyActive();
-            console.log('[RemoveBlockedUsers v1.8.6] Loaded and active successfully.');
+            console.log('[Revengecord Plugin Suite v1.9.0] Loaded and active successfully.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.6 Error]', e);
+            console.error('[Revengecord Plugin Suite v1.9.0] Error:', e);
         }
     }
 
@@ -1192,36 +1326,27 @@
         isStarted = false;
 
         try {
-            console.log('[RemoveBlockedUsers v1.8.6] Stopping...');
+            console.log('[Revengecord Plugin Suite v1.9.0] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[RemoveBlockedUsers v1.8.6] Stopped cleanly.');
+            console.log('[Revengecord Plugin Suite v1.9.0] Stopped cleanly.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.6 Error stopping]', e);
+            console.error('[Revengecord Plugin Suite v1.9.0] Error stopping:', e);
         }
     }
 
     const pluginExport = {
         name: 'RemoveBlockedUsers',
-        description: 'Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.',
+        description: 'DevilBro RemoveBlockedUsers mobile port. Removes blocked and ignored messages, strips collapsed bars, prunes orphaned date dividers, filters playerlist, and hides typing.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.8.6',
+        version: '1.9.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
         onUnload: stopPlugin
     };
 
-    return {
-        default: pluginExport,
-        start: startPlugin,
-        stop: stopPlugin,
-        onLoad: startPlugin,
-        onUnload: stopPlugin,
-        __esModule: true
-    };
-})(
-    typeof vendetta !== 'undefined' ? vendetta : (typeof window !== 'undefined' ? window.vendetta : (typeof revenge !== 'undefined' ? revenge : (typeof bunny !== 'undefined' ? bunny : undefined)))
-);
+    return pluginExport;
+})(typeof vendetta !== 'undefined' ? vendetta : undefined)

@@ -1,17 +1,13 @@
 {
-    "name": "RemoveBlockedUsers (ByeBlocked)",
-    "description": "Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.",
+    "name": "RemoveBlockedUsers",
+    "description": "DevilBro RemoveBlockedUsers mobile port. Removes blocked and ignored messages, strips collapsed bars, prunes orphaned date dividers, filters playerlist, and hides typing.",
     "authors": [
-        {
-            "name": "DevilBro",
-            "id": "278543574059057154"
-        },
         {
             "name": "Antigravity",
             "id": "698947564459917343"
         }
     ],
     "main": "index.js",
-    "version": "1.8.6",
-    "hash": "589d25f1997f2109377e9722eb10ebd7508ab0e9c564e8c27cf3e4d867165c5e"
+    "version": "1.9.0",
+    "hash": "fd2d587f6a0a2817d7f3714637d227ea5cf9fa602fa55e74d9646ddfe5189514"
 }

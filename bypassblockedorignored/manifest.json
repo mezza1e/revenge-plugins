@@ -1,17 +1,13 @@
 {
     "name": "BypassBlockedOrIgnored",
-    "description": "Bypass the blocked or ignored user modal if present in voice channels.",
+    "description": "nicola02nb BypassBlockedOrIgnored mobile port. Bypasses the blocked or ignored confirmation warning modal when joining voice channels.",
     "authors": [
-        {
-            "name": "nicola02nb",
-            "id": "690558489377407000"
-        },
         {
             "name": "Antigravity",
             "id": "698947564459917343"
         }
     ],
     "main": "index.js",
-    "version": "1.0.17",
-    "hash": "0edd2890b08fdc8b8c74af3137225ffaad9a5c9b8e5d5ada464805ef507f2051"
+    "version": "1.1.0",
+    "hash": "aeebf3c03c410ef5ec3be07097835061c6c7f1915d6d3fccf5f56da8dbe1a557"
 }

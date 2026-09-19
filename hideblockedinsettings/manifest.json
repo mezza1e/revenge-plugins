@@ -1,6 +1,6 @@
 {
     "name": "HideBlockedInSettings",
-    "description": "Hides Blocked and Ignored Users sections and guide notes from Content & Social, all Settings tabs, and Friends navigation tablist.",
+    "description": "Antigravity HideBlockedInSettings mobile port. Completely hides the Accounts you have blocked or ignored section and cards from Content & Social settings.",
     "authors": [
         {
             "name": "Antigravity",
@@ -8,6 +8,6 @@
         }
     ],
     "main": "index.js",
-    "version": "1.5.5",
-    "hash": "babd7711d5b0180d6d70a66c5b904f6a9b93c5fee669c72d247cb5fb9c6a0569"
+    "version": "1.6.0",
+    "hash": "73943455968c96c182ecaf9673c848fdc6ebf5f7c64cd326e40c00e67cbafb58"
 }
