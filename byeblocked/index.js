@@ -1,11 +1,11 @@
-/**
- * @name RemoveBlockedUsers
- * @description Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.
- * @version 1.8.5
- * @author Antigravity (Parity with DevilBro & nicola02nb)
- */
 (function(vendettaArg) {
     'use strict';
+    /**
+     * @name RemoveBlockedUsers
+     * @description Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.
+     * @version 1.8.6
+     * @author Antigravity (Parity with DevilBro & nicola02nb)
+     */
 
     // 1. Universal API Resolution
     const _vendetta = (typeof vendettaArg !== 'undefined' && vendettaArg) ||
@@ -195,7 +195,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'RemoveBlockedUsers v1.8.5: ACTIVE'
+                    content: 'RemoveBlockedUsers v1.8.6: ACTIVE'
                 });
                 return;
             }
@@ -203,7 +203,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('RemoveBlockedUsers v1.8.5: ACTIVE');
+                showToast('RemoveBlockedUsers v1.8.6: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -1099,13 +1099,13 @@
     // =========================================================================
     function startPlugin() {
         if (isStarted) {
-            console.log('[RemoveBlockedUsers v1.8.5] Already started, ignoring duplicate call.');
+            console.log('[RemoveBlockedUsers v1.8.6] Already started, ignoring duplicate call.');
             return;
         }
         isStarted = true;
 
         try {
-            console.log('[RemoveBlockedUsers v1.8.5] Initializing...');
+            console.log('[RemoveBlockedUsers v1.8.6] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -1115,13 +1115,13 @@
                            globalThis.revenge?.patcher ||
                            _patcher;
             }
-            if (!_metro) {
-                _metro = (typeof metro !== 'undefined' && metro) ||
-                          _vendetta.metro ||
-                          _revenge.modules?.finders ||
-                          globalThis.vendetta?.metro ||
-                          globalThis.revenge?.modules?.finders ||
-                          {};
+            if (!_metro || typeof _metro.findByProps !== 'function') {
+                _metro = _vendetta.metro ||
+                         _revenge.modules?.finders ||
+                         (typeof metro !== 'undefined' && metro) ||
+                         globalThis.vendetta?.metro ||
+                         globalThis.revenge?.modules?.finders ||
+                         _metro;
             }
             if (!_FluxDispatcher) {
                 _FluxDispatcher = _revenge.discord?.flux?.Dispatcher ||
@@ -1181,9 +1181,9 @@
             try { applyBypassBlockedOrIgnored(); } catch (err) { console.error('[applyBypassBlockedOrIgnored Error]', err); }
 
             notifyActive();
-            console.log('[RemoveBlockedUsers v1.8.5] Loaded and active successfully.');
+            console.log('[RemoveBlockedUsers v1.8.6] Loaded and active successfully.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.5 Error]', e);
+            console.error('[RemoveBlockedUsers v1.8.6 Error]', e);
         }
     }
 
@@ -1192,14 +1192,14 @@
         isStarted = false;
 
         try {
-            console.log('[RemoveBlockedUsers v1.8.5] Stopping...');
+            console.log('[RemoveBlockedUsers v1.8.6] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[RemoveBlockedUsers v1.8.5] Stopped cleanly.');
+            console.log('[RemoveBlockedUsers v1.8.6] Stopped cleanly.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.5 Error stopping]', e);
+            console.error('[RemoveBlockedUsers v1.8.6 Error stopping]', e);
         }
     }
 
@@ -1207,7 +1207,7 @@
         name: 'RemoveBlockedUsers',
         description: 'Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.8.5',
+        version: '1.8.6',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,

@@ -1,11 +1,11 @@
-/**
- * @name Revengecord Plugin Suite
- * @description Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored with 1:1 Desktop Parity. Completely eliminates blocked & ignored accounts from Content & Social settings, chat, member lists, and voice channels.
- * @version 4.5.2
- * @author Antigravity (Parity with DevilBro & nicola02nb)
- */
 (function(vendettaArg) {
     'use strict';
+    /**
+     * @name Revengecord Plugin Suite
+     * @description Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored with 1:1 Desktop Parity. Completely eliminates blocked & ignored accounts from Content & Social settings, chat, member lists, and voice channels.
+     * @version 4.5.3
+     * @author Antigravity (Parity with DevilBro & nicola02nb)
+     */
 
     // 1. Universal API Resolution
     const _vendetta = (typeof vendettaArg !== 'undefined' && vendettaArg) ||
@@ -195,7 +195,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'Revengecord Plugin Suite v4.5.2: ACTIVE'
+                    content: 'Revengecord Plugin Suite v4.5.3: ACTIVE'
                 });
                 return;
             }
@@ -203,7 +203,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('Revengecord Plugin Suite v4.5.2: ACTIVE');
+                showToast('Revengecord Plugin Suite v4.5.3: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -1099,13 +1099,13 @@
     // =========================================================================
     function startPlugin() {
         if (isStarted) {
-            console.log('[Revengecord Plugin Suite v4.5.2] Already started, ignoring duplicate call.');
+            console.log('[Revengecord Plugin Suite v4.5.3] Already started, ignoring duplicate call.');
             return;
         }
         isStarted = true;
 
         try {
-            console.log('[Revengecord Plugin Suite v4.5.2] Initializing...');
+            console.log('[Revengecord Plugin Suite v4.5.3] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -1115,13 +1115,13 @@
                            globalThis.revenge?.patcher ||
                            _patcher;
             }
-            if (!_metro) {
-                _metro = (typeof metro !== 'undefined' && metro) ||
-                          _vendetta.metro ||
-                          _revenge.modules?.finders ||
-                          globalThis.vendetta?.metro ||
-                          globalThis.revenge?.modules?.finders ||
-                          {};
+            if (!_metro || typeof _metro.findByProps !== 'function') {
+                _metro = _vendetta.metro ||
+                         _revenge.modules?.finders ||
+                         (typeof metro !== 'undefined' && metro) ||
+                         globalThis.vendetta?.metro ||
+                         globalThis.revenge?.modules?.finders ||
+                         _metro;
             }
             if (!_FluxDispatcher) {
                 _FluxDispatcher = _revenge.discord?.flux?.Dispatcher ||
@@ -1181,9 +1181,9 @@
             try { applyBypassBlockedOrIgnored(); } catch (err) { console.error('[applyBypassBlockedOrIgnored Error]', err); }
 
             notifyActive();
-            console.log('[Revengecord Plugin Suite v4.5.2] Loaded and active successfully.');
+            console.log('[Revengecord Plugin Suite v4.5.3] Loaded and active successfully.');
         } catch (e) {
-            console.error('[Revengecord Plugin Suite v4.5.2 Error]', e);
+            console.error('[Revengecord Plugin Suite v4.5.3 Error]', e);
         }
     }
 
@@ -1192,14 +1192,14 @@
         isStarted = false;
 
         try {
-            console.log('[Revengecord Plugin Suite v4.5.2] Stopping...');
+            console.log('[Revengecord Plugin Suite v4.5.3] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[Revengecord Plugin Suite v4.5.2] Stopped cleanly.');
+            console.log('[Revengecord Plugin Suite v4.5.3] Stopped cleanly.');
         } catch (e) {
-            console.error('[Revengecord Plugin Suite v4.5.2 Error stopping]', e);
+            console.error('[Revengecord Plugin Suite v4.5.3 Error stopping]', e);
         }
     }
 
@@ -1207,7 +1207,7 @@
         name: 'Revengecord Plugin Suite',
         description: 'Features RemoveBlockedUsers, HideBlockedInSettings, and BypassBlockedOrIgnored with 1:1 Desktop Parity. Completely eliminates blocked & ignored accounts from Content & Social settings, chat, member lists, and voice channels.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '4.5.2',
+        version: '4.5.3',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,

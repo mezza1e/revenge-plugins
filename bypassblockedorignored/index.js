@@ -1,11 +1,11 @@
-/**
- * @name BypassBlockedOrIgnored
- * @description Bypass the blocked or ignored user modal if present in voice channels.
- * @version 1.0.16
- * @author Antigravity (Parity with DevilBro & nicola02nb)
- */
 (function(vendettaArg) {
     'use strict';
+    /**
+     * @name BypassBlockedOrIgnored
+     * @description Bypass the blocked or ignored user modal if present in voice channels.
+     * @version 1.0.17
+     * @author Antigravity (Parity with DevilBro & nicola02nb)
+     */
 
     // 1. Universal API Resolution
     const _vendetta = (typeof vendettaArg !== 'undefined' && vendettaArg) ||
@@ -195,7 +195,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'BypassBlockedOrIgnored v1.0.16: ACTIVE'
+                    content: 'BypassBlockedOrIgnored v1.0.17: ACTIVE'
                 });
                 return;
             }
@@ -203,7 +203,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('BypassBlockedOrIgnored v1.0.16: ACTIVE');
+                showToast('BypassBlockedOrIgnored v1.0.17: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -1099,13 +1099,13 @@
     // =========================================================================
     function startPlugin() {
         if (isStarted) {
-            console.log('[BypassBlockedOrIgnored v1.0.16] Already started, ignoring duplicate call.');
+            console.log('[BypassBlockedOrIgnored v1.0.17] Already started, ignoring duplicate call.');
             return;
         }
         isStarted = true;
 
         try {
-            console.log('[BypassBlockedOrIgnored v1.0.16] Initializing...');
+            console.log('[BypassBlockedOrIgnored v1.0.17] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -1115,13 +1115,13 @@
                            globalThis.revenge?.patcher ||
                            _patcher;
             }
-            if (!_metro) {
-                _metro = (typeof metro !== 'undefined' && metro) ||
-                          _vendetta.metro ||
-                          _revenge.modules?.finders ||
-                          globalThis.vendetta?.metro ||
-                          globalThis.revenge?.modules?.finders ||
-                          {};
+            if (!_metro || typeof _metro.findByProps !== 'function') {
+                _metro = _vendetta.metro ||
+                         _revenge.modules?.finders ||
+                         (typeof metro !== 'undefined' && metro) ||
+                         globalThis.vendetta?.metro ||
+                         globalThis.revenge?.modules?.finders ||
+                         _metro;
             }
             if (!_FluxDispatcher) {
                 _FluxDispatcher = _revenge.discord?.flux?.Dispatcher ||
@@ -1181,9 +1181,9 @@
             try { applyBypassBlockedOrIgnored(); } catch (err) { console.error('[applyBypassBlockedOrIgnored Error]', err); }
 
             notifyActive();
-            console.log('[BypassBlockedOrIgnored v1.0.16] Loaded and active successfully.');
+            console.log('[BypassBlockedOrIgnored v1.0.17] Loaded and active successfully.');
         } catch (e) {
-            console.error('[BypassBlockedOrIgnored v1.0.16 Error]', e);
+            console.error('[BypassBlockedOrIgnored v1.0.17 Error]', e);
         }
     }
 
@@ -1192,14 +1192,14 @@
         isStarted = false;
 
         try {
-            console.log('[BypassBlockedOrIgnored v1.0.16] Stopping...');
+            console.log('[BypassBlockedOrIgnored v1.0.17] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[BypassBlockedOrIgnored v1.0.16] Stopped cleanly.');
+            console.log('[BypassBlockedOrIgnored v1.0.17] Stopped cleanly.');
         } catch (e) {
-            console.error('[BypassBlockedOrIgnored v1.0.16 Error stopping]', e);
+            console.error('[BypassBlockedOrIgnored v1.0.17 Error stopping]', e);
         }
     }
 
@@ -1207,7 +1207,7 @@
         name: 'BypassBlockedOrIgnored',
         description: 'Bypass the blocked or ignored user modal if present in voice channels.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.0.16',
+        version: '1.0.17',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,

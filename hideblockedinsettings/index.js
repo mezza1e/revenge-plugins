@@ -1,11 +1,11 @@
-/**
- * @name HideBlockedInSettings
- * @description Hides Blocked and Ignored Users sections and guide notes from Content & Social, all Settings tabs, and Friends navigation tablist.
- * @version 1.5.4
- * @author Antigravity (Parity with DevilBro & nicola02nb)
- */
 (function(vendettaArg) {
     'use strict';
+    /**
+     * @name HideBlockedInSettings
+     * @description Hides Blocked and Ignored Users sections and guide notes from Content & Social, all Settings tabs, and Friends navigation tablist.
+     * @version 1.5.5
+     * @author Antigravity (Parity with DevilBro & nicola02nb)
+     */
 
     // 1. Universal API Resolution
     const _vendetta = (typeof vendettaArg !== 'undefined' && vendettaArg) ||
@@ -195,7 +195,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'HideBlockedInSettings v1.5.4: ACTIVE'
+                    content: 'HideBlockedInSettings v1.5.5: ACTIVE'
                 });
                 return;
             }
@@ -203,7 +203,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('HideBlockedInSettings v1.5.4: ACTIVE');
+                showToast('HideBlockedInSettings v1.5.5: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -1099,13 +1099,13 @@
     // =========================================================================
     function startPlugin() {
         if (isStarted) {
-            console.log('[HideBlockedInSettings v1.5.4] Already started, ignoring duplicate call.');
+            console.log('[HideBlockedInSettings v1.5.5] Already started, ignoring duplicate call.');
             return;
         }
         isStarted = true;
 
         try {
-            console.log('[HideBlockedInSettings v1.5.4] Initializing...');
+            console.log('[HideBlockedInSettings v1.5.5] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -1115,13 +1115,13 @@
                            globalThis.revenge?.patcher ||
                            _patcher;
             }
-            if (!_metro) {
-                _metro = (typeof metro !== 'undefined' && metro) ||
-                          _vendetta.metro ||
-                          _revenge.modules?.finders ||
-                          globalThis.vendetta?.metro ||
-                          globalThis.revenge?.modules?.finders ||
-                          {};
+            if (!_metro || typeof _metro.findByProps !== 'function') {
+                _metro = _vendetta.metro ||
+                         _revenge.modules?.finders ||
+                         (typeof metro !== 'undefined' && metro) ||
+                         globalThis.vendetta?.metro ||
+                         globalThis.revenge?.modules?.finders ||
+                         _metro;
             }
             if (!_FluxDispatcher) {
                 _FluxDispatcher = _revenge.discord?.flux?.Dispatcher ||
@@ -1181,9 +1181,9 @@
             try { applyBypassBlockedOrIgnored(); } catch (err) { console.error('[applyBypassBlockedOrIgnored Error]', err); }
 
             notifyActive();
-            console.log('[HideBlockedInSettings v1.5.4] Loaded and active successfully.');
+            console.log('[HideBlockedInSettings v1.5.5] Loaded and active successfully.');
         } catch (e) {
-            console.error('[HideBlockedInSettings v1.5.4 Error]', e);
+            console.error('[HideBlockedInSettings v1.5.5 Error]', e);
         }
     }
 
@@ -1192,14 +1192,14 @@
         isStarted = false;
 
         try {
-            console.log('[HideBlockedInSettings v1.5.4] Stopping...');
+            console.log('[HideBlockedInSettings v1.5.5] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[HideBlockedInSettings v1.5.4] Stopped cleanly.');
+            console.log('[HideBlockedInSettings v1.5.5] Stopped cleanly.');
         } catch (e) {
-            console.error('[HideBlockedInSettings v1.5.4 Error stopping]', e);
+            console.error('[HideBlockedInSettings v1.5.5 Error stopping]', e);
         }
     }
 
@@ -1207,7 +1207,7 @@
         name: 'HideBlockedInSettings',
         description: 'Hides Blocked and Ignored Users sections and guide notes from Content & Social, all Settings tabs, and Friends navigation tablist.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.5.4',
+        version: '1.5.5',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
