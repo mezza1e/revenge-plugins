@@ -242,69 +242,163 @@
             .toLowerCase();
     }
 
+    const dynamicBlockedPhrases = new Set([
+        "accounts you've blocked or ignored",
+        "accounts you've blocked",
+        "blocked or ignored",
+        "blocked accounts",
+        "ignored accounts",
+        "blocked users",
+        "ignored users",
+        "you're in control",
+        "reducing unwanted interactions",
+        "explore our feature guide",
+        "feature guide"
+    ]);
+
     function isSettingsBlockedString(str) {
         if (typeof str !== 'string') return false;
         const s = normalizeSettingsText(str);
         if (!s) return false;
 
-        return s.includes("accounts you've blocked or ignored") ||
-               s.includes("accounts you've blocked") ||
-               s.includes("blocked or ignored") ||
-               s.includes("blocked accounts") ||
-               s.includes("ignored accounts") ||
-               s.includes("blocked users") ||
-               s.includes("ignored users") ||
-               s.includes("you're in control") ||
-               s.includes("reducing unwanted interactions") ||
-               s.includes("explore our feature guide") ||
-               s.includes("feature guide") ||
-               s === "blocked" ||
-               s === "ignored";
+        for (const phrase of dynamicBlockedPhrases) {
+            if (s.includes(phrase)) return true;
+        }
+        return s === "blocked" || s === "ignored";
     }
 
-    function isSettingsBlockedSection(val, depth = 0) {
-        if (!val || depth > 6) return false;
+    // Target detection for specific elements without falsely matching parent containers
+    function isSettingsBlockedElement(val) {
+        if (!val) return false;
 
         // 1. Plain string
         if (typeof val === 'string') {
             return isSettingsBlockedString(val);
         }
 
-        // 2. Array of items / children
-        if (Array.isArray(val)) {
-            const combined = val
-                .filter(c => typeof c === 'string')
-                .join(' ');
-            if (combined && isSettingsBlockedString(combined)) return true;
-
-            for (let i = 0; i < val.length; i++) {
-                if (isSettingsBlockedSection(val[i], depth + 1)) return true;
-            }
-            return false;
-        }
-
-        // 3. Object / React Element / Props
+        // 2. React element or props object
         if (typeof val === 'object') {
-            const checkKeys = [
-                'label', 'title', 'header', 'subLabel', 'text', 'description',
-                'accessibilityLabel', 'aria-label', 'footer', 'helpText',
-                'trailingText', 'leadingText', 'detail', 'value', 'subTitle',
-                'hint', 'note', 'body', 'content', 'sectionTitle', 'titleText',
-                'name', 'children'
-            ];
+            const p = val.props || val;
 
-            for (const k of checkKeys) {
-                if (val[k] != null && isSettingsBlockedSection(val[k], depth + 1)) {
-                    return true;
-                }
+            // Direct title / label / text
+            const directKeys = ['title', 'header', 'label', 'text', 'sectionTitle', 'titleText', 'name'];
+            for (const k of directKeys) {
+                if (typeof p[k] === 'string' && isSettingsBlockedString(p[k])) return true;
             }
 
-            if (val.props && typeof val.props === 'object') {
-                if (isSettingsBlockedSection(val.props, depth + 1)) return true;
+            // Description / footer / helpText / subLabel
+            const descKeys = ['footer', 'helpText', 'description', 'subLabel', 'note', 'body', 'trailingText'];
+            for (const k of descKeys) {
+                if (typeof p[k] === 'string' && isSettingsBlockedString(p[k])) return true;
+            }
+
+            // String children (e.g. Text component)
+            if (typeof p.children === 'string' && isSettingsBlockedString(p.children)) {
+                return true;
+            }
+
+            // Array of strings in children
+            if (Array.isArray(p.children)) {
+                const textOnly = p.children.filter(c => typeof c === 'string').join(' ');
+                if (textOnly && isSettingsBlockedString(textOnly)) return true;
             }
         }
 
         return false;
+    }
+
+    function renderEmptyRow() {
+        if (React && typeof React.createElement === 'function' && View) {
+            try {
+                return React.createElement(View, {
+                    style: { display: 'none', height: 0, width: 0, opacity: 0, overflow: 'hidden' },
+                    pointerEvents: 'none'
+                });
+            } catch (_) {}
+        }
+        return null;
+    }
+
+    // Pure React tree sanitizer that NEVER mutates frozen props
+    function sanitizeTree(node, depth = 0) {
+        if (!node || depth > 8) return node;
+
+        if (isSettingsBlockedElement(node)) {
+            return null;
+        }
+
+        if (node.props && node.props.children) {
+            if (Array.isArray(node.props.children)) {
+                const filtered = [];
+                for (let i = 0; i < node.props.children.length; i++) {
+                    const child = node.props.children[i];
+                    if (!isSettingsBlockedElement(child)) {
+                        const sanitized = sanitizeTree(child, depth + 1);
+                        if (sanitized) filtered.push(sanitized);
+                    }
+                }
+                return {
+                    ...node,
+                    props: {
+                        ...node.props,
+                        children: filtered
+                    }
+                };
+            } else if (typeof node.props.children === 'object') {
+                if (isSettingsBlockedElement(node.props.children)) {
+                    return {
+                        ...node,
+                        props: {
+                            ...node.props,
+                            children: null
+                        }
+                    };
+                }
+                return {
+                    ...node,
+                    props: {
+                        ...node.props,
+                        children: sanitizeTree(node.props.children, depth + 1)
+                    }
+                };
+            }
+        }
+
+        return node;
+    }
+
+    // Helper to gather all loaded Metro modules across Vendetta / Bunny / Revenge
+    function getAllMetroModules() {
+        const modules = new Set();
+        if (typeof _metro.findAll === 'function') {
+            try {
+                const all = _metro.findAll(() => true);
+                if (Array.isArray(all)) {
+                    for (const m of all) if (m) modules.add(m);
+                }
+            } catch (_) {}
+        }
+        if (typeof __r === 'function' && typeof __r.getModules === 'function') {
+            try {
+                const raw = __r.getModules();
+                for (const k in raw) {
+                    const mod = raw[k];
+                    if (mod?.publicModule?.exports) modules.add(mod.publicModule.exports);
+                    else if (mod?.exports) modules.add(mod.exports);
+                }
+            } catch (_) {}
+        }
+        if (_vendetta.metro?.modules) {
+            try {
+                for (const k in _vendetta.metro.modules) {
+                    const mod = _vendetta.metro.modules[k];
+                    if (mod?.publicModule?.exports) modules.add(mod.publicModule.exports);
+                    else if (mod?.exports) modules.add(mod.exports);
+                    else if (mod) modules.add(mod);
+                }
+            } catch (_) {}
+        }
+        return Array.from(modules);
     }
 
     function updateHeaderCount(headerItem, diff) {
@@ -319,18 +413,6 @@
             }
         });
         return clonedHeader;
-    }
-
-    function renderEmptyRow() {
-        if (React && typeof React.createElement === 'function' && View) {
-            try {
-                return React.createElement(View, {
-                    style: { display: 'none', height: 0, width: 0, opacity: 0, overflow: 'hidden' },
-                    pointerEvents: 'none'
-                });
-            } catch (_) {}
-        }
-        return null;
     }
 
     function sanitizeMessage(msg) {
@@ -545,19 +627,26 @@
             }
 
             if (_metro.findByProps) {
-                RelationshipStore = _metro.findByProps('getRelationships', 'isBlocked') ||
+                RelationshipStore = (_metro.findByStoreName && _metro.findByStoreName('RelationshipStore')) ||
+                                    (_metro.find && _metro.find(m => m?.getName?.() === 'RelationshipStore' || m?.default?.getName?.() === 'RelationshipStore')) ||
+                                    _metro.findByProps('getRelationships', 'isBlocked') ||
                                     _metro.findByProps('isBlocked') ||
                                     _metro.findByProps('getRelationships');
-                GuildMemberStore = _metro.findByProps('getMember', 'getMembers');
-                ChannelMemberStore = _metro.findByProps('getProps', 'getRows') ||
-                                     (_metro.findByStoreName && (_metro.findByStoreName('ChannelMemberStore') || _metro.findByStoreName('ChannelMembersStore')));
-                MemberListStore = _metro.findByProps('getMemberListSections') ||
-                                  _metro.findByProps('getRows', 'getGroups') ||
-                                  (_metro.findByStoreName && (_metro.findByStoreName('GuildMemberListStore') || _metro.findByStoreName('ChannelMemberListStore')));
-                MessageStore = _metro.findByProps('getMessages', 'getMessage');
-                UserStore = _metro.findByProps('getUser', 'getUsers');
+                GuildMemberStore = (_metro.findByStoreName && _metro.findByStoreName('GuildMemberStore')) ||
+                                   _metro.findByProps('getMember', 'getMembers');
+                ChannelMemberStore = (_metro.findByStoreName && (_metro.findByStoreName('ChannelMemberStore') || _metro.findByStoreName('ChannelMembersStore'))) ||
+                                     _metro.findByProps('getProps', 'getRows');
+                MemberListStore = (_metro.findByStoreName && (_metro.findByStoreName('GuildMemberListStore') || _metro.findByStoreName('ChannelMemberListStore'))) ||
+                                  _metro.findByProps('getMemberListSections') ||
+                                  _metro.findByProps('getRows', 'getGroups');
+                MessageStore = (_metro.findByStoreName && _metro.findByStoreName('MessageStore')) ||
+                               _metro.findByProps('getMessages', 'getMessage');
+                UserStore = (_metro.findByStoreName && _metro.findByStoreName('UserStore')) ||
+                            _metro.findByProps('getUser', 'getUsers');
                 TypingStore = _metro.findByProps('getTypingUsers');
-                PresenceStore = _metro.findByProps('getState', 'getStatus') || _metro.findByProps('getStatus');
+                PresenceStore = (_metro.findByStoreName && _metro.findByStoreName('PresenceStore')) ||
+                                _metro.findByProps('getState', 'getStatus') ||
+                                _metro.findByProps('getStatus');
                 RowManager = _metro.findByProps('RowManager')?.RowManager ||
                              (_metro.findByName && _metro.findByName('RowManager'));
                 if (!React) {
@@ -572,14 +661,16 @@
             }
 
             if (RelationshipStore) {
-                rawIsBlocked = RelationshipStore.isBlocked;
-                rawIsIgnored = RelationshipStore.isIgnored;
-                rawGetRelationships = RelationshipStore.getRelationships;
-                rawGetBlockedUserIds = RelationshipStore.getBlockedUserIds;
+                const store = RelationshipStore.default && typeof RelationshipStore.default.getRelationships === 'function' ? RelationshipStore.default : RelationshipStore;
+                rawIsBlocked = store.isBlocked;
+                rawIsIgnored = store.isIgnored;
+                rawGetRelationships = store.getRelationships;
+                rawGetBlockedUserIds = store.getBlockedUserIds;
                 syncFromRelationshipStore();
             }
             if (PresenceStore) {
-                rawGetPresenceStatus = PresenceStore.getStatus;
+                const store = PresenceStore.default && typeof PresenceStore.default.getStatus === 'function' ? PresenceStore.default : PresenceStore;
+                rawGetPresenceStatus = store.getStatus;
             }
 
             applyBypassBlockedOrIgnored();

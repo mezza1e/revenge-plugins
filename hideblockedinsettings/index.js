@@ -1,7 +1,7 @@
 /**
  * @name HideBlockedInSettings
  * @description Hides Blocked and Ignored Users sections and guide notes from Content & Social, all Settings tabs, and Friends navigation tablist.
- * @version 1.4.0
+ * @version 1.5.0
  * @author Antigravity (Parity with DevilBro & nicola02nb)
  */
 (function(vendettaArg) {
@@ -112,7 +112,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'HideBlockedInSettings v1.4.0: ACTIVE'
+                    content: 'HideBlockedInSettings v1.5.0: ACTIVE'
                 });
                 return;
             }
@@ -120,7 +120,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('HideBlockedInSettings v1.4.0: ACTIVE');
+                showToast('HideBlockedInSettings v1.5.0: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -242,69 +242,163 @@
             .toLowerCase();
     }
 
+    const dynamicBlockedPhrases = new Set([
+        "accounts you've blocked or ignored",
+        "accounts you've blocked",
+        "blocked or ignored",
+        "blocked accounts",
+        "ignored accounts",
+        "blocked users",
+        "ignored users",
+        "you're in control",
+        "reducing unwanted interactions",
+        "explore our feature guide",
+        "feature guide"
+    ]);
+
     function isSettingsBlockedString(str) {
         if (typeof str !== 'string') return false;
         const s = normalizeSettingsText(str);
         if (!s) return false;
 
-        return s.includes("accounts you've blocked or ignored") ||
-               s.includes("accounts you've blocked") ||
-               s.includes("blocked or ignored") ||
-               s.includes("blocked accounts") ||
-               s.includes("ignored accounts") ||
-               s.includes("blocked users") ||
-               s.includes("ignored users") ||
-               s.includes("you're in control") ||
-               s.includes("reducing unwanted interactions") ||
-               s.includes("explore our feature guide") ||
-               s.includes("feature guide") ||
-               s === "blocked" ||
-               s === "ignored";
+        for (const phrase of dynamicBlockedPhrases) {
+            if (s.includes(phrase)) return true;
+        }
+        return s === "blocked" || s === "ignored";
     }
 
-    function isSettingsBlockedSection(val, depth = 0) {
-        if (!val || depth > 6) return false;
+    // Target detection for specific elements without falsely matching parent containers
+    function isSettingsBlockedElement(val) {
+        if (!val) return false;
 
         // 1. Plain string
         if (typeof val === 'string') {
             return isSettingsBlockedString(val);
         }
 
-        // 2. Array of items / children
-        if (Array.isArray(val)) {
-            const combined = val
-                .filter(c => typeof c === 'string')
-                .join(' ');
-            if (combined && isSettingsBlockedString(combined)) return true;
-
-            for (let i = 0; i < val.length; i++) {
-                if (isSettingsBlockedSection(val[i], depth + 1)) return true;
-            }
-            return false;
-        }
-
-        // 3. Object / React Element / Props
+        // 2. React element or props object
         if (typeof val === 'object') {
-            const checkKeys = [
-                'label', 'title', 'header', 'subLabel', 'text', 'description',
-                'accessibilityLabel', 'aria-label', 'footer', 'helpText',
-                'trailingText', 'leadingText', 'detail', 'value', 'subTitle',
-                'hint', 'note', 'body', 'content', 'sectionTitle', 'titleText',
-                'name', 'children'
-            ];
+            const p = val.props || val;
 
-            for (const k of checkKeys) {
-                if (val[k] != null && isSettingsBlockedSection(val[k], depth + 1)) {
-                    return true;
-                }
+            // Direct title / label / text
+            const directKeys = ['title', 'header', 'label', 'text', 'sectionTitle', 'titleText', 'name'];
+            for (const k of directKeys) {
+                if (typeof p[k] === 'string' && isSettingsBlockedString(p[k])) return true;
             }
 
-            if (val.props && typeof val.props === 'object') {
-                if (isSettingsBlockedSection(val.props, depth + 1)) return true;
+            // Description / footer / helpText / subLabel
+            const descKeys = ['footer', 'helpText', 'description', 'subLabel', 'note', 'body', 'trailingText'];
+            for (const k of descKeys) {
+                if (typeof p[k] === 'string' && isSettingsBlockedString(p[k])) return true;
+            }
+
+            // String children (e.g. Text component)
+            if (typeof p.children === 'string' && isSettingsBlockedString(p.children)) {
+                return true;
+            }
+
+            // Array of strings in children
+            if (Array.isArray(p.children)) {
+                const textOnly = p.children.filter(c => typeof c === 'string').join(' ');
+                if (textOnly && isSettingsBlockedString(textOnly)) return true;
             }
         }
 
         return false;
+    }
+
+    function renderEmptyRow() {
+        if (React && typeof React.createElement === 'function' && View) {
+            try {
+                return React.createElement(View, {
+                    style: { display: 'none', height: 0, width: 0, opacity: 0, overflow: 'hidden' },
+                    pointerEvents: 'none'
+                });
+            } catch (_) {}
+        }
+        return null;
+    }
+
+    // Pure React tree sanitizer that NEVER mutates frozen props
+    function sanitizeTree(node, depth = 0) {
+        if (!node || depth > 8) return node;
+
+        if (isSettingsBlockedElement(node)) {
+            return null;
+        }
+
+        if (node.props && node.props.children) {
+            if (Array.isArray(node.props.children)) {
+                const filtered = [];
+                for (let i = 0; i < node.props.children.length; i++) {
+                    const child = node.props.children[i];
+                    if (!isSettingsBlockedElement(child)) {
+                        const sanitized = sanitizeTree(child, depth + 1);
+                        if (sanitized) filtered.push(sanitized);
+                    }
+                }
+                return {
+                    ...node,
+                    props: {
+                        ...node.props,
+                        children: filtered
+                    }
+                };
+            } else if (typeof node.props.children === 'object') {
+                if (isSettingsBlockedElement(node.props.children)) {
+                    return {
+                        ...node,
+                        props: {
+                            ...node.props,
+                            children: null
+                        }
+                    };
+                }
+                return {
+                    ...node,
+                    props: {
+                        ...node.props,
+                        children: sanitizeTree(node.props.children, depth + 1)
+                    }
+                };
+            }
+        }
+
+        return node;
+    }
+
+    // Helper to gather all loaded Metro modules across Vendetta / Bunny / Revenge
+    function getAllMetroModules() {
+        const modules = new Set();
+        if (typeof _metro.findAll === 'function') {
+            try {
+                const all = _metro.findAll(() => true);
+                if (Array.isArray(all)) {
+                    for (const m of all) if (m) modules.add(m);
+                }
+            } catch (_) {}
+        }
+        if (typeof __r === 'function' && typeof __r.getModules === 'function') {
+            try {
+                const raw = __r.getModules();
+                for (const k in raw) {
+                    const mod = raw[k];
+                    if (mod?.publicModule?.exports) modules.add(mod.publicModule.exports);
+                    else if (mod?.exports) modules.add(mod.exports);
+                }
+            } catch (_) {}
+        }
+        if (_vendetta.metro?.modules) {
+            try {
+                for (const k in _vendetta.metro.modules) {
+                    const mod = _vendetta.metro.modules[k];
+                    if (mod?.publicModule?.exports) modules.add(mod.publicModule.exports);
+                    else if (mod?.exports) modules.add(mod.exports);
+                    else if (mod) modules.add(mod);
+                }
+            } catch (_) {}
+        }
+        return Array.from(modules);
     }
 
     function updateHeaderCount(headerItem, diff) {
@@ -319,18 +413,6 @@
             }
         });
         return clonedHeader;
-    }
-
-    function renderEmptyRow() {
-        if (React && typeof React.createElement === 'function' && View) {
-            try {
-                return React.createElement(View, {
-                    style: { display: 'none', height: 0, width: 0, opacity: 0, overflow: 'hidden' },
-                    pointerEvents: 'none'
-                });
-            } catch (_) {}
-        }
-        return null;
     }
 
     function sanitizeMessage(msg) {
@@ -477,167 +559,169 @@
     }
 
     function applyHideBlockedInSettings() {
-        // A. RelationshipStore: Neutralize Settings queries
-        if (RelationshipStore) {
-            if (typeof RelationshipStore.getBlockedUserIds === 'function') {
-                safePatch('instead', RelationshipStore, 'getBlockedUserIds', () => []);
-            }
-            if (typeof RelationshipStore.getIgnoredUserIds === 'function') {
-                safePatch('instead', RelationshipStore, 'getIgnoredUserIds', () => []);
-            }
-            if (typeof RelationshipStore.getBlockedOrIgnoredUserIds === 'function') {
-                safePatch('instead', RelationshipStore, 'getBlockedOrIgnoredUserIds', () => []);
-            }
-            if (typeof RelationshipStore.getBlockedOrIgnoredIDs === 'function') {
-                safePatch('instead', RelationshipStore, 'getBlockedOrIgnoredIDs', () => []);
-            }
-            if (typeof RelationshipStore.getRelationships === 'function') {
-                safePatch('instead', RelationshipStore, 'getRelationships', function(args, orig) {
-                    const res = orig ? orig.apply(this, args) : {};
-                    if (!res || typeof res !== 'object') return res;
-                    const cloned = { ...res };
-                    for (const uid in cloned) {
-                        if (cloned[uid] === 2 || cloned[uid] === 5) delete cloned[uid];
-                    }
-                    return cloned;
-                });
-            }
-            if (typeof RelationshipStore.getRelationshipType === 'function') {
-                safePatch('instead', RelationshipStore, 'getRelationshipType', function(args, orig) {
-                    const targetId = args[0];
-                    if (isBlockedOrIgnored(targetId)) return 0;
-                    return orig ? orig.apply(this, args) : 0;
-                });
-            }
-            if (typeof RelationshipStore.getRelationshipCount === 'function') {
-                safePatch('instead', RelationshipStore, 'getRelationshipCount', function(args, orig) {
-                    const type = args[0];
-                    if (type === 2 || type === 5) return 0;
-                    return orig ? orig.apply(this, args) : 0;
-                });
-            }
-            if (typeof RelationshipStore.getBlockedCount === 'function') {
-                safePatch('instead', RelationshipStore, 'getBlockedCount', () => 0);
-            }
-            if (typeof RelationshipStore.getIgnoredCount === 'function') {
-                safePatch('instead', RelationshipStore, 'getIgnoredCount', () => 0);
-            }
-            if (typeof RelationshipStore.hasBlocked === 'function') {
-                safePatch('instead', RelationshipStore, 'hasBlocked', () => false);
-            }
-            if (typeof RelationshipStore.hasIgnored === 'function') {
-                safePatch('instead', RelationshipStore, 'hasIgnored', () => false);
-            }
-            if (typeof RelationshipStore.isBlocked === 'function') {
-                safePatch('instead', RelationshipStore, 'isBlocked', () => false);
-            }
-            if (typeof RelationshipStore.isIgnored === 'function') {
-                safePatch('instead', RelationshipStore, 'isIgnored', () => false);
-            }
-        }
-
-        // B. Multi-Component Interception across all Metro Form & Table modules
+        // A. Dynamic I18n String Capture from Discord dictionary
         try {
-            const formKeys = [
-                'TableSection',
-                'TableRow',
-                'TableRowGroup',
-                'TableSwitchRow',
-                'TableActionRow',
-                'TableRadioRow',
-                'TableCheckboxRow',
-                'FormSection',
-                'FormSectionTitle',
-                'FormRow',
-                'FormHelpText',
-                'FormNotice',
-                'FormText',
-                'FormDivider',
-                'SettingsSection',
-                'SettingsRow',
-                'SettingsRowGroup',
-                'SettingsListSection',
-                'SettingsNotice',
-                'SettingsHelpText'
-            ];
-
-            const settingsTargetMods = new Set();
-            if (_vendetta.ui?.components?.Forms) settingsTargetMods.add(_vendetta.ui.components.Forms);
-            if (_vendetta.ui?.components) settingsTargetMods.add(_vendetta.ui.components);
-
-            // 1. Find all modules via findAll
-            if (typeof _metro.findAll === 'function') {
-                try {
-                    const all = _metro.findAll(m => {
-                        if (!m || typeof m !== 'object') return false;
-                        for (const p of formKeys) {
-                            if (typeof m[p] === 'function' || (m.default && typeof m.default[p] === 'function')) {
-                                return true;
-                            }
+            const I18n = _metro.findByProps && (_metro.findByProps('Messages', 'intl') || _metro.findByProps('Messages'));
+            const msgs = I18n?.Messages || _common.i18n?.Messages;
+            if (msgs) {
+                for (const k in msgs) {
+                    const lowerK = k.toLowerCase();
+                    if (lowerK.includes('blocked_account') ||
+                        lowerK.includes('ignored_account') ||
+                        lowerK.includes('blocked_or_ignored') ||
+                        lowerK.includes('accounts_youve_blocked')) {
+                        const val = msgs[k];
+                        if (typeof val === 'string') {
+                            dynamicBlockedPhrases.add(normalizeSettingsText(val));
+                        } else if (typeof val === 'function') {
+                            try {
+                                const rendered = val();
+                                if (typeof rendered === 'string') dynamicBlockedPhrases.add(normalizeSettingsText(rendered));
+                            } catch (_) {}
                         }
-                        return false;
-                    });
-                    if (Array.isArray(all)) {
-                        for (const mod of all) settingsTargetMods.add(mod);
                     }
+                }
+            }
+        } catch (_) {}
+
+        // B. RelationshipStore & Prototype Deep Neutralization
+        try {
+            const storeCandidates = new Set();
+            if (_metro.findByStoreName) {
+                try {
+                    const s = _metro.findByStoreName('RelationshipStore');
+                    if (s) storeCandidates.add(s);
                 } catch (_) {}
             }
+            if (_metro.find) {
+                try {
+                    const s = _metro.find(m => m?.getName?.() === 'RelationshipStore' || m?.default?.getName?.() === 'RelationshipStore');
+                    if (s) storeCandidates.add(s);
+                } catch (_) {}
+            }
+            if (_metro.findByProps) {
+                try {
+                    const s = _metro.findByProps('getRelationships', 'isBlocked');
+                    if (s) storeCandidates.add(s);
+                } catch (_) {}
+            }
+            if (RelationshipStore) storeCandidates.add(RelationshipStore);
 
-            // 2. Find via findByProps, findByName, and findByDisplayName
-            for (const p of formKeys) {
-                if (_metro.findByProps) {
-                    try {
-                        const m = _metro.findByProps(p);
-                        if (m && typeof m === 'object') settingsTargetMods.add(m);
-                    } catch (_) {}
-                }
-                if (typeof _metro.findByName === 'function') {
-                    try {
-                        const c = _metro.findByName(p);
-                        if (typeof c === 'function') settingsTargetMods.add({ [p]: c });
-                    } catch (_) {}
-                }
-                if (typeof _metro.findByDisplayName === 'function') {
-                    try {
-                        const c = _metro.findByDisplayName(p);
-                        if (typeof c === 'function') settingsTargetMods.add({ [p]: c });
-                    } catch (_) {}
-                }
+            const allStores = [];
+            for (const c of storeCandidates) {
+                if (!c) continue;
+                allStores.push(c);
+                if (c.default && typeof c.default === 'object') allStores.push(c.default);
             }
 
-            // 3. Patch every found component
-            for (const mod of settingsTargetMods) {
-                for (const k of formKeys) {
-                    if (typeof mod[k] === 'function') {
-                        safePatch('instead', mod, k, function(args, orig) {
-                            const p = args[0] || {};
-                            if (isSettingsBlockedSection(p)) return renderEmptyRow();
-                            if (Array.isArray(p.children)) {
-                                p.children = p.children.filter(c => !isSettingsBlockedSection(c));
-                            }
-                            const res = orig ? orig.apply(this, args) : null;
-                            if (res && res.props) {
-                                if (isSettingsBlockedSection(res.props)) return renderEmptyRow();
-                                if (Array.isArray(res.props.children)) {
-                                    res.props.children = res.props.children.filter(c => !isSettingsBlockedSection(c));
-                                }
-                            }
-                            return res;
+            const zeroMethods = ['getBlockedUserIds', 'getIgnoredUserIds', 'getBlockedOrIgnoredUserIds', 'getBlockedOrIgnoredIDs'];
+            const countMethods = ['getBlockedCount', 'getIgnoredCount', 'getBlockedUserCount', 'getIgnoredUserCount'];
+
+            for (const store of allStores) {
+                for (const m of zeroMethods) {
+                    if (typeof store[m] === 'function') safePatch('instead', store, m, () => []);
+                }
+                for (const m of countMethods) {
+                    if (typeof store[m] === 'function') safePatch('instead', store, m, () => 0);
+                }
+                if (typeof store.getRelationshipCount === 'function') {
+                    safePatch('instead', store, 'getRelationshipCount', function(args, orig) {
+                        const type = args[0];
+                        if (type === 2 || type === 5) return 0;
+                        return orig ? orig.apply(this, args) : 0;
+                    });
+                }
+                if (typeof store.getCount === 'function') {
+                    safePatch('instead', store, 'getCount', function(args, orig) {
+                        const type = args[0];
+                        if (type === 2 || type === 5) return 0;
+                        return orig ? orig.apply(this, args) : 0;
+                    });
+                }
+                if (typeof store.getRelationships === 'function') {
+                    safePatch('instead', store, 'getRelationships', function(args, orig) {
+                        const res = orig ? orig.apply(this, args) : {};
+                        if (!res || typeof res !== 'object') return res;
+                        const cloned = { ...res };
+                        for (const uid in cloned) {
+                            if (cloned[uid] === 2 || cloned[uid] === 5) delete cloned[uid];
+                        }
+                        return cloned;
+                    });
+                }
+                if (typeof store.getRelationshipType === 'function') {
+                    safePatch('instead', store, 'getRelationshipType', function(args, orig) {
+                        const uid = args[0];
+                        if (isBlockedOrIgnored(uid)) return 0;
+                        return orig ? orig.apply(this, args) : 0;
+                    });
+                }
+                if (typeof store.isBlocked === 'function') safePatch('instead', store, 'isBlocked', () => false);
+                if (typeof store.isIgnored === 'function') safePatch('instead', store, 'isIgnored', () => false);
+                if (typeof store.hasBlocked === 'function') safePatch('instead', store, 'hasBlocked', () => false);
+                if (typeof store.hasIgnored === 'function') safePatch('instead', store, 'hasIgnored', () => false);
+
+                // Patch Prototype
+                if (store.constructor && store.constructor.prototype && store.constructor.prototype !== Object.prototype) {
+                    const proto = store.constructor.prototype;
+                    for (const m of zeroMethods) {
+                        if (typeof proto[m] === 'function') safePatch('instead', proto, m, () => []);
+                    }
+                    for (const m of countMethods) {
+                        if (typeof proto[m] === 'function') safePatch('instead', proto, m, () => 0);
+                    }
+                    if (typeof proto.getRelationshipCount === 'function') {
+                        safePatch('instead', proto, 'getRelationshipCount', function(args, orig) {
+                            const type = args[0];
+                            if (type === 2 || type === 5) return 0;
+                            return orig ? orig.apply(this, args) : 0;
                         });
                     }
-                    if (mod.default && typeof mod.default === 'object' && typeof mod.default[k] === 'function') {
-                        safePatch('instead', mod.default, k, function(args, orig) {
-                            const p = args[0] || {};
-                            if (isSettingsBlockedSection(p)) return renderEmptyRow();
-                            if (Array.isArray(p.children)) {
-                                p.children = p.children.filter(c => !isSettingsBlockedSection(c));
+                    if (typeof proto.getRelationships === 'function') {
+                        safePatch('instead', proto, 'getRelationships', function(args, orig) {
+                            const res = orig ? orig.apply(this, args) : {};
+                            if (!res || typeof res !== 'object') return res;
+                            const cloned = { ...res };
+                            for (const uid in cloned) {
+                                if (cloned[uid] === 2 || cloned[uid] === 5) delete cloned[uid];
+                            }
+                            return cloned;
+                        });
+                    }
+                    if (typeof proto.isBlocked === 'function') safePatch('instead', proto, 'isBlocked', () => false);
+                    if (typeof proto.isIgnored === 'function') safePatch('instead', proto, 'isIgnored', () => false);
+                }
+            }
+        } catch (_) {}
+
+        // C. JSX Runtime & React.createElement Level Interception
+        try {
+            if (React && typeof React.createElement === 'function') {
+                safePatch('instead', React, 'createElement', function(args, orig) {
+                    const props = args[1];
+                    if (props && isSettingsBlockedElement(props)) {
+                        return renderEmptyRow();
+                    }
+                    const res = orig ? orig.apply(this, args) : null;
+                    if (res && isSettingsBlockedElement(res)) {
+                        return renderEmptyRow();
+                    }
+                    return res;
+                });
+            }
+
+            const jsxRuntime = _metro.findByProps && _metro.findByProps('jsx', 'jsxs');
+            if (jsxRuntime) {
+                for (const fn of ['jsx', 'jsxs', 'jsxDEV']) {
+                    if (typeof jsxRuntime[fn] === 'function') {
+                        safePatch('instead', jsxRuntime, fn, function(args, orig) {
+                            const props = args[1];
+                            if (props && isSettingsBlockedElement(props)) {
+                                return renderEmptyRow();
                             }
                             const res = orig ? orig.apply(this, args) : null;
-                            if (res && res.props) {
-                                if (isSettingsBlockedSection(res.props)) return renderEmptyRow();
-                                if (Array.isArray(res.props.children)) {
-                                    res.props.children = res.props.children.filter(c => !isSettingsBlockedSection(c));
-                                }
+                            if (res && isSettingsBlockedElement(res)) {
+                                return renderEmptyRow();
                             }
                             return res;
                         });
@@ -646,7 +730,102 @@
             }
         } catch (_) {}
 
-        // C. Filter Section Data Builders & Layout Hooks
+        // D. Comprehensive Metro Component Scanning & Patching
+        try {
+            const targetCompNames = new Set([
+                'TableSection',
+                'TableRow',
+                'TableRowGroup',
+                'TableSwitchRow',
+                'TableActionRow',
+                'TableRadioRow',
+                'TableCheckboxRow',
+                'Table',
+                'FormSection',
+                'FormSectionTitle',
+                'FormRow',
+                'FormHelpText',
+                'FormNotice',
+                'FormText',
+                'FormTitle',
+                'SettingsSection',
+                'SettingsRow',
+                'SettingsRowGroup',
+                'SettingsListSection',
+                'SettingsNotice',
+                'SettingsHelpText'
+            ]);
+
+            function hookComponent(holder, propName) {
+                if (!holder || typeof holder[propName] !== 'function') return;
+                safePatch('instead', holder, propName, function(args, orig) {
+                    const p = args[0];
+                    if (p && isSettingsBlockedElement(p)) {
+                        return renderEmptyRow();
+                    }
+                    const res = orig ? orig.apply(this, args) : null;
+                    if (!res) return res;
+                    if (isSettingsBlockedElement(res)) {
+                        return renderEmptyRow();
+                    }
+                    return sanitizeTree(res);
+                });
+            }
+
+            const allMods = getAllMetroModules();
+            for (const mod of allMods) {
+                if (!mod || typeof mod !== 'object') continue;
+
+                // 1. Direct properties on module
+                for (const k in mod) {
+                    if (targetCompNames.has(k) && typeof mod[k] === 'function') {
+                        hookComponent(mod, k);
+                    }
+                }
+
+                // 2. Mod.default
+                if (mod.default) {
+                    if (typeof mod.default === 'function') {
+                        const name = mod.default.name || mod.default.displayName;
+                        if (targetCompNames.has(name) || /Table|Form|Setting/i.test(name)) {
+                            hookComponent(mod, 'default');
+                        }
+                    } else if (typeof mod.default === 'object') {
+                        for (const k in mod.default) {
+                            if (targetCompNames.has(k) && typeof mod.default[k] === 'function') {
+                                hookComponent(mod.default, k);
+                            }
+                        }
+                    }
+                }
+
+                // 3. Screen component hooks
+                for (const t of [mod, mod.default]) {
+                    if (!t) continue;
+                    const name = t.name || t.displayName;
+                    if (typeof name === 'string' && /content.*social|privacy.*safety/i.test(name)) {
+                        if (typeof t === 'function') {
+                            if (t.prototype && typeof t.prototype.render === 'function') {
+                                safePatch('after', t.prototype, 'render', function(args, res) {
+                                    return sanitizeTree(res);
+                                });
+                            } else {
+                                hookComponent(mod, t === mod.default ? 'default' : name);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Also check standard forms
+            if (_vendetta.ui?.components?.Forms) {
+                for (const k in _vendetta.ui.components.Forms) {
+                    hookComponent(_vendetta.ui.components.Forms, k);
+                }
+            }
+        } catch (_) {}
+
+        // E. Filter Section Data Builders & Layout Hooks
         try {
             const sectionBuilderKeys = [
                 'getSettingsSections',
@@ -670,12 +849,12 @@
                         if (mod && typeof mod[fnName] === 'function') {
                             safePatch('after', mod, fnName, function(args, res) {
                                 if (Array.isArray(res)) {
-                                    return res.filter(s => !isSettingsBlockedSection(s)).map(s => {
+                                    return res.filter(s => !isSettingsBlockedElement(s)).map(s => {
                                         if (!s || typeof s !== 'object') return s;
                                         const cloned = { ...s };
                                         for (const key of ['items', 'rows', 'data', 'children', 'sections']) {
                                             if (Array.isArray(cloned[key])) {
-                                                cloned[key] = cloned[key].filter(it => !isSettingsBlockedSection(it));
+                                                cloned[key] = cloned[key].filter(it => !isSettingsBlockedElement(it));
                                             }
                                         }
                                         return cloned;
@@ -689,7 +868,7 @@
             }
         } catch (_) {}
 
-        // D. Friends Navigation Tablist Filter
+        // F. Friends Navigation Tablist Filter
         try {
             const friendsNavMod = _metro.findByProps && _metro.findByProps('FriendsTabs', 'getFriendsTabs');
             if (friendsNavMod) {
@@ -709,7 +888,7 @@
 
     function startPlugin() {
         try {
-            console.log('[HideBlockedInSettings v1.4.0] Initializing...');
+            console.log('[HideBlockedInSettings v1.5.0] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -735,19 +914,26 @@
             }
 
             if (_metro.findByProps) {
-                RelationshipStore = _metro.findByProps('getRelationships', 'isBlocked') ||
+                RelationshipStore = (_metro.findByStoreName && _metro.findByStoreName('RelationshipStore')) ||
+                                    (_metro.find && _metro.find(m => m?.getName?.() === 'RelationshipStore' || m?.default?.getName?.() === 'RelationshipStore')) ||
+                                    _metro.findByProps('getRelationships', 'isBlocked') ||
                                     _metro.findByProps('isBlocked') ||
                                     _metro.findByProps('getRelationships');
-                GuildMemberStore = _metro.findByProps('getMember', 'getMembers');
-                ChannelMemberStore = _metro.findByProps('getProps', 'getRows') ||
-                                     (_metro.findByStoreName && (_metro.findByStoreName('ChannelMemberStore') || _metro.findByStoreName('ChannelMembersStore')));
-                MemberListStore = _metro.findByProps('getMemberListSections') ||
-                                  _metro.findByProps('getRows', 'getGroups') ||
-                                  (_metro.findByStoreName && (_metro.findByStoreName('GuildMemberListStore') || _metro.findByStoreName('ChannelMemberListStore')));
-                MessageStore = _metro.findByProps('getMessages', 'getMessage');
-                UserStore = _metro.findByProps('getUser', 'getUsers');
+                GuildMemberStore = (_metro.findByStoreName && _metro.findByStoreName('GuildMemberStore')) ||
+                                   _metro.findByProps('getMember', 'getMembers');
+                ChannelMemberStore = (_metro.findByStoreName && (_metro.findByStoreName('ChannelMemberStore') || _metro.findByStoreName('ChannelMembersStore'))) ||
+                                     _metro.findByProps('getProps', 'getRows');
+                MemberListStore = (_metro.findByStoreName && (_metro.findByStoreName('GuildMemberListStore') || _metro.findByStoreName('ChannelMemberListStore'))) ||
+                                  _metro.findByProps('getMemberListSections') ||
+                                  _metro.findByProps('getRows', 'getGroups');
+                MessageStore = (_metro.findByStoreName && _metro.findByStoreName('MessageStore')) ||
+                               _metro.findByProps('getMessages', 'getMessage');
+                UserStore = (_metro.findByStoreName && _metro.findByStoreName('UserStore')) ||
+                            _metro.findByProps('getUser', 'getUsers');
                 TypingStore = _metro.findByProps('getTypingUsers');
-                PresenceStore = _metro.findByProps('getState', 'getStatus') || _metro.findByProps('getStatus');
+                PresenceStore = (_metro.findByStoreName && _metro.findByStoreName('PresenceStore')) ||
+                                _metro.findByProps('getState', 'getStatus') ||
+                                _metro.findByProps('getStatus');
                 RowManager = _metro.findByProps('RowManager')?.RowManager ||
                              (_metro.findByName && _metro.findByName('RowManager'));
                 if (!React) {
@@ -762,35 +948,37 @@
             }
 
             if (RelationshipStore) {
-                rawIsBlocked = RelationshipStore.isBlocked;
-                rawIsIgnored = RelationshipStore.isIgnored;
-                rawGetRelationships = RelationshipStore.getRelationships;
-                rawGetBlockedUserIds = RelationshipStore.getBlockedUserIds;
+                const store = RelationshipStore.default && typeof RelationshipStore.default.getRelationships === 'function' ? RelationshipStore.default : RelationshipStore;
+                rawIsBlocked = store.isBlocked;
+                rawIsIgnored = store.isIgnored;
+                rawGetRelationships = store.getRelationships;
+                rawGetBlockedUserIds = store.getBlockedUserIds;
                 syncFromRelationshipStore();
             }
             if (PresenceStore) {
-                rawGetPresenceStatus = PresenceStore.getStatus;
+                const store = PresenceStore.default && typeof PresenceStore.default.getStatus === 'function' ? PresenceStore.default : PresenceStore;
+                rawGetPresenceStatus = store.getStatus;
             }
 
             applyHideBlockedInSettings();
 
             notifyActive();
-            console.log('[HideBlockedInSettings v1.4.0] Loaded and active successfully.');
+            console.log('[HideBlockedInSettings v1.5.0] Loaded and active successfully.');
         } catch (e) {
-            console.error('[HideBlockedInSettings v1.4.0 Error]', e);
+            console.error('[HideBlockedInSettings v1.5.0 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[HideBlockedInSettings v1.4.0] Stopping...');
+            console.log('[HideBlockedInSettings v1.5.0] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[HideBlockedInSettings v1.4.0] Stopped cleanly.');
+            console.log('[HideBlockedInSettings v1.5.0] Stopped cleanly.');
         } catch (e) {
-            console.error('[HideBlockedInSettings v1.4.0 Error stopping]', e);
+            console.error('[HideBlockedInSettings v1.5.0 Error stopping]', e);
         }
     }
 
@@ -798,7 +986,7 @@
         name: 'HideBlockedInSettings',
         description: 'Hides Blocked and Ignored Users sections and guide notes from Content & Social, all Settings tabs, and Friends navigation tablist.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.4.0',
+        version: '1.5.0',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
