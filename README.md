@@ -1,4 +1,4 @@
-# Revengecord Plugins by mezza1e (v4.5.1)
+# Revengecord Plugins by mezza1e (v4.5.2)
 
 Clean, high-performance mobile ports of essential Discord desktop plugins for **Revengecord / Vendetta / Bunny**.
 
@@ -16,7 +16,7 @@ In Revengecord mobile app:
 3. Tap **Install Plugin** (+) and paste:
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.2/
 ```
 
 *(Alternative GitHub Pages URL: `https://mezza1e.github.io/revenge-plugins/`)*
@@ -31,40 +31,40 @@ https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/
 
 If you prefer installing each feature as an independent plugin matching your desktop setup:
 
-### 1. HideBlockedInSettings (v1.5.3)
+### 1. HideBlockedInSettings (v1.5.4)
 *Parity with Antigravity's HideBlockedInSettings*
 * Hides "Accounts you've blocked or ignored" section header from **Content & Social** settings.
 * Hides "Blocked accounts" and "Ignored accounts" rows.
 * Hides the feature guide disclaimer note ("You're in control. To compare your options...").
 * Hides the "Blocked" tab from the Friends navigation list.
-* Supports React.forwardRef and React.memo component patching.
+* Supports React.forwardRef, React.memo, and nested wrapper component patching.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/hideblockedinsettings/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.2/hideblockedinsettings/
 ```
 
 ---
 
-### 2. RemoveBlockedUsers (v1.8.4)
+### 2. RemoveBlockedUsers (v1.8.5)
 *Parity with DevilBro's RemoveBlockedUsers*
 * Removes blocked & ignored messages completely from chat.
 * Eliminates the collapsed "X blocked messages" bar.
 * Prunes orphaned date dividers.
 * Strips reply quotes and mentions of blocked users.
-* Hides blocked users from channel and guild member lists with DevilBro 80-line exact group count decrements.
+* Hides blocked users from channel and guild member lists with DevilBro exact group count decrements and dense array safety.
 * Suppresses typing indicators and presence.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/removeblockedusers/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.2/removeblockedusers/
 ```
 
 ---
 
-### 3. BypassBlockedOrIgnored (v1.0.15)
+### 3. BypassBlockedOrIgnored (v1.0.16)
 *Parity with nicola02nb's BypassBlockedOrIgnored*
 * Bypasses the blocked/ignored user confirmation warning modal when joining a voice channel.
 * Suppresses the warning popup when a blocked or ignored user joins your active voice channel.
 
 ```text
-https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.1/bypassblockedorignored/
+https://cdn.jsdelivr.net/gh/mezza1e/revenge-plugins@4.5.2/bypassblockedorignored/
 ```

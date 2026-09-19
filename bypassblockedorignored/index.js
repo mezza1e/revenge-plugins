@@ -1,7 +1,7 @@
 /**
  * @name BypassBlockedOrIgnored
  * @description Bypass the blocked or ignored user modal if present in voice channels.
- * @version 1.0.15
+ * @version 1.0.16
  * @author Antigravity (Parity with DevilBro & nicola02nb)
  */
 (function(vendettaArg) {
@@ -27,6 +27,7 @@
                    (typeof globalThis !== 'undefined' && (globalThis.__antigravity_storage = globalThis.__antigravity_storage || {})) ||
                    {};
     const unpatches = [];
+    let isStarted = false;
 
     // Universal Metro Finders across Vendetta, Revenge, and Bunny
     function findByProps(...props) {
@@ -140,7 +141,8 @@
     // React Component Patcher supporting Functions, React.forwardRef, and React.memo
     function safePatchComponent(mod, prop, hook) {
         if (!mod || !prop) return;
-        let target = mod[prop];
+        let target;
+        try { target = mod[prop]; } catch (_) { return; }
         if (!target) return;
 
         // A. Direct function component
@@ -151,20 +153,36 @@
             return;
         }
 
-        // B. React.forwardRef component: target.render is the component function
-        if (typeof target === 'object' && target !== null && typeof target.render === 'function') {
-            safePatch('instead', target, 'render', function(args, orig) {
-                return hook.call(this, args, orig);
-            });
-            return;
-        }
+        // B. Unwrap memo / forwardRef layers
+        let current = target;
+        for (let depth = 0; depth < 5; depth++) {
+            if (!current || typeof current !== 'object') break;
 
-        // C. React.memo component: target.type is the component function
-        if (typeof target === 'object' && target !== null && typeof target.type === 'function') {
-            safePatch('instead', target, 'type', function(args, orig) {
-                return hook.call(this, args, orig);
-            });
-            return;
+            if (typeof current.render === 'function') {
+                safePatch('instead', current, 'render', function(args, orig) {
+                    return hook.call(this, args, orig);
+                });
+                return;
+            }
+
+            if (typeof current.type === 'function') {
+                safePatch('instead', current, 'type', function(args, orig) {
+                    return hook.call(this, args, orig);
+                });
+                return;
+            }
+
+            if (current.type && typeof current.type === 'object') {
+                current = current.type;
+                continue;
+            }
+
+            if (current.default && typeof current.default === 'object') {
+                current = current.default;
+                continue;
+            }
+
+            break;
         }
     }
 
@@ -177,7 +195,7 @@
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'BypassBlockedOrIgnored v1.0.15: ACTIVE'
+                    content: 'BypassBlockedOrIgnored v1.0.16: ACTIVE'
                 });
                 return;
             }
@@ -185,7 +203,7 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('BypassBlockedOrIgnored v1.0.15: ACTIVE');
+                showToast('BypassBlockedOrIgnored v1.0.16: ACTIVE');
                 return;
             }
         } catch (_) {}
@@ -254,8 +272,14 @@
 
         // Fallback to raw store methods
         try {
-            if (rawIsBlocked && rawIsBlocked.call(RelationshipStore, s)) return true;
-            if (rawIsIgnored && rawIsIgnored.call(RelationshipStore, s)) return true;
+            if (rawIsBlocked && rawIsBlocked(s)) {
+                blockedUserIdsSet.add(s);
+                return true;
+            }
+            if (rawIsIgnored && rawIsIgnored(s)) {
+                ignoredUserIdsSet.add(s);
+                return true;
+            }
         } catch (_) {}
         return false;
     }
@@ -306,7 +330,7 @@
 
     // Exact string detection handling typographical curly apostrophes (' vs ’)
     function isSettingsBlockedSection(val, depth = 0) {
-        if (!val || depth > 5) return false;
+        if (!val || depth > 6) return false;
         if (typeof val === 'string') {
             const lower = val.replace(/[\u2018\u2019\u0060\u00B4]/g, "'").trim().toLowerCase();
             return lower.includes("accounts you've blocked or ignored") ||
@@ -318,23 +342,37 @@
                    lower === "ignored users" ||
                    lower.includes("you're in control") ||
                    lower.includes("reducing unwanted interactions") ||
+                   lower.includes("explore our feature guide") ||
                    lower.includes("feature guide") ||
-                   (lower === "blocked" && depth > 0);
+                   (lower === "blocked" && depth > 0) ||
+                   (lower === "ignored" && depth > 0);
+        }
+        if (Array.isArray(val)) {
+            for (let i = 0; i < val.length; i++) {
+                if (isSettingsBlockedSection(val[i], depth + 1)) return true;
+            }
+            const joined = val.filter(x => typeof x === 'string').join(' ');
+            if (joined && isSettingsBlockedSection(joined, depth + 1)) return true;
+            return false;
         }
         if (typeof val === 'object') {
-            for (const k of ['label', 'text', 'title', 'header', 'subLabel', 'sublabel', 'description', 'footer', 'helpText', 'note', 'accessibilityLabel', 'aria-label']) {
+            for (const k of [
+                'label', 'text', 'title', 'header', 'subLabel', 'sublabel',
+                'description', 'footer', 'helpText', 'note', 'accessibilityLabel',
+                'aria-label', 'children', 'content', 'body', 'hint'
+            ]) {
                 if (val[k] && isSettingsBlockedSection(val[k], depth + 1)) return true;
             }
             if (val.props && isSettingsBlockedSection(val.props, depth + 1)) return true;
-            if (typeof val.children === 'string' && isSettingsBlockedSection(val.children, depth + 1)) return true;
         }
         return false;
     }
 
     function renderEmptyRow() {
-        if (React && typeof React.createElement === 'function' && View) {
+        if (React && typeof React.createElement === 'function') {
             try {
-                return React.createElement(View, {
+                const V = View || 'View';
+                return React.createElement(V, {
                     style: { height: 0, width: 0, opacity: 0, overflow: 'hidden' },
                     pointerEvents: 'none'
                 });
@@ -441,7 +479,7 @@
         return pruneOrphanedDateDividers(temp);
     }
 
-    // Proven 80-line DevilBro Desktop Parity Algorithm for ChannelMemberStore
+    // Proven DevilBro Algorithm with DENSE, Contiguous React Native Array Safety
     function sanitizeDesktopStyleChannelMembers(props) {
         if (!props || typeof props !== 'object') return props;
         if (!Array.isArray(props.rows) || !Array.isArray(props.groups)) return props;
@@ -506,24 +544,6 @@
 
         if (!hiddenRows) return props;
 
-        let leadingOffset = 0;
-        for (let i = 0; i < newRows.length; i++) {
-            const r = newRows[i];
-            if (r && isGroupRow(r)) break;
-            if (r !== undefined) leadingOffset++;
-        }
-
-        let indexSum = leadingOffset;
-        for (let i = 0; i < newGroups.length; i++) {
-            const grp = newGroups[i];
-            if (grp && grp.id !== 'content-inventory-feed') {
-                grp.index = indexSum;
-                if (typeof grp.count === 'number' && grp.count > 0) {
-                    indexSum += (grp.count + 1);
-                }
-            }
-        }
-
         for (let i = 0; i < newRows.length; i++) {
             const r = newRows[i];
             if (r && isGroupRow(r) && typeof r.count === 'number' && r.count <= 0) {
@@ -531,29 +551,19 @@
             }
         }
 
-        const removeEmptyWithin = (array, filter) => {
-            let reversed = [].concat(array).reverse();
-            let suffixLength = 0;
-            for (let i = 0; i < reversed.length; i++) {
-                if (reversed[i] !== undefined) {
-                    suffixLength = i;
-                    break;
-                }
-            }
-            return [].concat(array.filter(filter), new Array(suffixLength));
-        };
-
-        const finalRows = removeEmptyWithin(newRows, n => n !== undefined);
-        if (newGroups[0] && newGroups[0].id === 'content-inventory-feed') {
-            newGroups[0].index = finalRows.length - (newGroups[0].count + 1);
-        }
-        const finalGroups = removeEmptyWithin(newGroups, g => g && g.count > 0);
+        // Return dense contiguous arrays without undefined slots (safe for React Native FlatList/FlashList)
+        const finalRows = newRows.filter(r => r != null);
+        const finalGroups = newGroups.filter(g => g != null && (typeof g.count !== 'number' || g.count > 0));
 
         for (let i = 0; i < finalGroups.length; i++) {
             const grp = finalGroups[i];
-            let actualIdx = finalRows.findIndex(r => r && isGroupRow(r) && r.id === grp.id);
-            if (actualIdx === -1) actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
+            if (!grp) continue;
+            let actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
             if (actualIdx !== -1) grp.index = actualIdx;
+        }
+
+        if (finalGroups[0] && finalGroups[0].id === 'content-inventory-feed') {
+            finalGroups[0].index = Math.max(0, finalRows.length - (finalGroups[0].count + 1));
         }
 
         return {
@@ -567,7 +577,7 @@
         if (!RelationshipStore) return;
         try {
             let updated = false;
-            const rels = rawGetRelationships ? rawGetRelationships.call(RelationshipStore) : (typeof RelationshipStore.getRelationships === 'function' ? RelationshipStore.getRelationships() : null);
+            const rels = rawGetRelationships ? rawGetRelationships() : (typeof RelationshipStore.getRelationships === 'function' ? RelationshipStore.getRelationships() : null);
             if (rels && typeof rels === 'object') {
                 for (const uid in rels) {
                     const sUid = String(uid);
@@ -582,7 +592,7 @@
                 }
             }
             if (rawGetBlockedUserIds) {
-                const bIds = rawGetBlockedUserIds.call(RelationshipStore);
+                const bIds = rawGetBlockedUserIds();
                 if (Array.isArray(bIds)) {
                     for (const id of bIds) {
                         const sId = String(id);
@@ -880,7 +890,7 @@
             });
         }
 
-        // I. Direct Member Row Component Hooks
+        // I. Direct Member & Blocked Row Component Hooks
         try {
             const memberRowNames = ['MemberListItem', 'GuildMemberRow', 'ChannelMemberRow', 'MemberRow', 'GuildMemberListItem'];
             for (const name of memberRowNames) {
@@ -890,6 +900,16 @@
                         const props = args[0];
                         if (isMemberBlockedOrIgnored(props)) return renderEmptyRow();
                         return orig ? orig.apply(this, args) : null;
+                    });
+                }
+            }
+
+            const blockedRowNames = ['BlockedMessageRow', 'BlockedRow', 'BlockedGroup', 'BlockedMessageGroup', 'BlockedMessages'];
+            for (const name of blockedRowNames) {
+                const holder = findByProps(name);
+                if (holder) {
+                    safePatchComponent(holder, name, function() {
+                        return renderEmptyRow();
                     });
                 }
             }
@@ -965,27 +985,46 @@
         try {
             const settingsTargetMods = new Set();
             if (_vendetta.ui?.components?.Forms) settingsTargetMods.add(_vendetta.ui.components.Forms);
+            if (_vendetta.ui?.components) settingsTargetMods.add(_vendetta.ui.components);
+
             const formKeys = [
                 'TableRow', 'TableSection', 'TableRowGroup',
                 'TableSwitchRow', 'TableRadioRow', 'TableCheckboxRow',
-                'FormRow', 'FormSection', 'FormHelpText', 'FormNotice', 'FormLabel', 'FormTitle'
+                'FormRow', 'FormSection', 'FormHelpText', 'FormNotice', 'FormLabel', 'FormTitle',
+                'FormSectionTitle', 'TableSectionHeader', 'SettingsSection', 'SettingsRow',
+                'SettingsRowGroup', 'SettingsNotice', 'SettingsHelpText'
             ];
             for (const p of formKeys) {
                 const m = findByProps(p);
-                if (m && typeof m === 'object') settingsTargetMods.add(m);
+                if (m && typeof m === 'object') {
+                    settingsTargetMods.add(m);
+                    if (m.default && typeof m.default === 'object') settingsTargetMods.add(m.default);
+                }
             }
             for (const mod of settingsTargetMods) {
                 for (const k of formKeys) {
                     safePatchComponent(mod, k, function(args, orig) {
                         const p = args[0] || {};
                         if (isSettingsBlockedSection(p)) return renderEmptyRow();
-                        if (k === 'TableRowGroup' && p.children) {
-                            const ch = Array.isArray(p.children) ? p.children : [p.children];
-                            const nonBlocked = ch.filter(c => c && !isSettingsBlockedSection(c));
-                            if (nonBlocked.length === 0) return renderEmptyRow();
+                        if (p.children) {
+                            const flatChildren = Array.isArray(p.children) ? p.children.flat(Infinity) : [p.children];
+                            const validChildren = flatChildren.filter(c => c != null && c !== false);
+                            if (validChildren.length > 0) {
+                                const nonBlocked = validChildren.filter(c => !isSettingsBlockedSection(c));
+                                if (nonBlocked.length === 0) return renderEmptyRow();
+                            }
                         }
                         const res = orig ? orig.apply(this, args) : null;
-                        if (res && res.props && isSettingsBlockedSection(res.props)) return renderEmptyRow();
+                        if (res && res.props) {
+                            if (isSettingsBlockedSection(res.props)) return renderEmptyRow();
+                            if (res.props.children) {
+                                const flatRes = Array.isArray(res.props.children) ? res.props.children.flat(Infinity) : [res.props.children];
+                                const validRes = flatRes.filter(c => c != null && c !== false);
+                                if (validRes.length > 0 && validRes.every(c => isSettingsBlockedSection(c))) {
+                                    return renderEmptyRow();
+                                }
+                            }
+                        }
                         return res;
                     });
                 }
@@ -1059,8 +1098,14 @@
     // Plugin Lifecycle
     // =========================================================================
     function startPlugin() {
+        if (isStarted) {
+            console.log('[BypassBlockedOrIgnored v1.0.16] Already started, ignoring duplicate call.');
+            return;
+        }
+        isStarted = true;
+
         try {
-            console.log('[BypassBlockedOrIgnored v1.0.15] Initializing...');
+            console.log('[BypassBlockedOrIgnored v1.0.16] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -1113,10 +1158,18 @@
             }
 
             if (RelationshipStore) {
-                rawIsBlocked = RelationshipStore.isBlocked;
-                rawIsIgnored = RelationshipStore.isIgnored;
-                rawGetRelationships = RelationshipStore.getRelationships;
-                rawGetBlockedUserIds = RelationshipStore.getBlockedUserIds;
+                if (!rawIsBlocked && typeof RelationshipStore.isBlocked === 'function') {
+                    rawIsBlocked = RelationshipStore.isBlocked.bind(RelationshipStore);
+                }
+                if (!rawIsIgnored && typeof RelationshipStore.isIgnored === 'function') {
+                    rawIsIgnored = RelationshipStore.isIgnored.bind(RelationshipStore);
+                }
+                if (!rawGetRelationships && typeof RelationshipStore.getRelationships === 'function') {
+                    rawGetRelationships = RelationshipStore.getRelationships.bind(RelationshipStore);
+                }
+                if (!rawGetBlockedUserIds && typeof RelationshipStore.getBlockedUserIds === 'function') {
+                    rawGetBlockedUserIds = RelationshipStore.getBlockedUserIds.bind(RelationshipStore);
+                }
                 syncFromRelationshipStore();
             }
             if (PresenceStore) {
@@ -1128,22 +1181,25 @@
             try { applyBypassBlockedOrIgnored(); } catch (err) { console.error('[applyBypassBlockedOrIgnored Error]', err); }
 
             notifyActive();
-            console.log('[BypassBlockedOrIgnored v1.0.15] Loaded and active successfully.');
+            console.log('[BypassBlockedOrIgnored v1.0.16] Loaded and active successfully.');
         } catch (e) {
-            console.error('[BypassBlockedOrIgnored v1.0.15 Error]', e);
+            console.error('[BypassBlockedOrIgnored v1.0.16 Error]', e);
         }
     }
 
     function stopPlugin() {
+        if (!isStarted) return;
+        isStarted = false;
+
         try {
-            console.log('[BypassBlockedOrIgnored v1.0.15] Stopping...');
+            console.log('[BypassBlockedOrIgnored v1.0.16] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[BypassBlockedOrIgnored v1.0.15] Stopped cleanly.');
+            console.log('[BypassBlockedOrIgnored v1.0.16] Stopped cleanly.');
         } catch (e) {
-            console.error('[BypassBlockedOrIgnored v1.0.15 Error stopping]', e);
+            console.error('[BypassBlockedOrIgnored v1.0.16 Error stopping]', e);
         }
     }
 
@@ -1151,7 +1207,7 @@
         name: 'BypassBlockedOrIgnored',
         description: 'Bypass the blocked or ignored user modal if present in voice channels.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.0.15',
+        version: '1.0.16',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
