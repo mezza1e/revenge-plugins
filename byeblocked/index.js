@@ -1,7 +1,7 @@
 /**
  * @name RemoveBlockedUsers
  * @description Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.
- * @version 1.8.3
+ * @version 1.8.4
  * @author Antigravity (Parity with DevilBro & nicola02nb)
  */
 (function(vendettaArg) {
@@ -17,18 +17,8 @@
                      (typeof window !== 'undefined' && window.revenge) ||
                      (typeof globalThis !== 'undefined' && (globalThis.revenge || _vendetta.revenge)) ||
                      {};
-    let _metro = (typeof metro !== 'undefined' && metro) ||
-                 _vendetta.metro ||
-                 _revenge.modules?.finders ||
-                 globalThis.vendetta?.metro ||
-                 globalThis.revenge?.modules?.finders ||
-                 {};
-    let _patcher = (typeof patcher !== 'undefined' && patcher) ||
-                   _vendetta.patcher ||
-                   _revenge.patcher ||
-                   globalThis.vendetta?.patcher ||
-                   globalThis.revenge?.patcher ||
-                   {};
+    let _metro = _revenge.modules?.finders || _vendetta.metro || (typeof metro !== 'undefined' && metro) || {};
+    let _patcher = _revenge.patcher || _vendetta.patcher || (typeof patcher !== 'undefined' && patcher) || {};
     let _common = _vendetta.metro?.common || (typeof metroCommon !== 'undefined' && metroCommon) || {};
     let _storage = _vendetta.plugin?.storage ||
                    _vendetta.storage ||
@@ -147,17 +137,47 @@
         } catch (_) {}
     }
 
+    // React Component Patcher supporting Functions, React.forwardRef, and React.memo
+    function safePatchComponent(mod, prop, hook) {
+        if (!mod || !prop) return;
+        let target = mod[prop];
+        if (!target) return;
+
+        // A. Direct function component
+        if (typeof target === 'function') {
+            safePatch('instead', mod, prop, function(args, orig) {
+                return hook.call(this, args, orig);
+            });
+            return;
+        }
+
+        // B. React.forwardRef component: target.render is the component function
+        if (typeof target === 'object' && target !== null && typeof target.render === 'function') {
+            safePatch('instead', target, 'render', function(args, orig) {
+                return hook.call(this, args, orig);
+            });
+            return;
+        }
+
+        // C. React.memo component: target.type is the component function
+        if (typeof target === 'object' && target !== null && typeof target.type === 'function') {
+            safePatch('instead', target, 'type', function(args, orig) {
+                return hook.call(this, args, orig);
+            });
+            return;
+        }
+    }
+
     let _FluxDispatcher = null;
     let React = null;
     let View = null;
 
-    // Visual confirmation toast
     function notifyActive() {
         try {
             if (_revenge.discord?.actions?.ToastActionCreators?.open) {
                 _revenge.discord.actions.ToastActionCreators.open({
                     key: 'plugin-active',
-                    content: 'RemoveBlockedUsers v1.8.3: ACTIVE'
+                    content: 'RemoveBlockedUsers v1.8.4: ACTIVE'
                 });
                 return;
             }
@@ -165,13 +185,12 @@
         try {
             const showToast = _vendetta.ui?.toasts?.showToast || _common.toasts?.open;
             if (typeof showToast === 'function') {
-                showToast('RemoveBlockedUsers v1.8.3: ACTIVE');
+                showToast('RemoveBlockedUsers v1.8.4: ACTIVE');
                 return;
             }
         } catch (_) {}
     }
 
-    // Dynamic relationship tracking sets
     const blockedUserIdsSet = new Set();
     const ignoredUserIdsSet = new Set();
     const blockedMessageIdsSet = new Set();
@@ -233,12 +252,10 @@
         if (myId && s === myId) return false;
         if (blockedUserIdsSet.has(s) || ignoredUserIdsSet.has(s)) return true;
 
-        // Direct store fallback
+        // Fallback to raw store methods
         try {
-            if (rawIsBlocked) return rawIsBlocked.call(RelationshipStore, s);
-            if (RelationshipStore && typeof RelationshipStore.isBlocked === 'function') {
-                return RelationshipStore.isBlocked(s);
-            }
+            if (rawIsBlocked && rawIsBlocked.call(RelationshipStore, s)) return true;
+            if (rawIsIgnored && rawIsIgnored.call(RelationshipStore, s)) return true;
         } catch (_) {}
         return false;
     }
@@ -287,7 +304,7 @@
         return false;
     }
 
-    // Normalization handles ASCII and curly typographical apostrophes (' vs ’) with depth safeguard
+    // Exact string detection handling typographical curly apostrophes (' vs ’)
     function isSettingsBlockedSection(val, depth = 0) {
         if (!val || depth > 5) return false;
         if (typeof val === 'string') {
@@ -424,29 +441,126 @@
         return pruneOrphanedDateDividers(temp);
     }
 
+    // Proven 80-line DevilBro Desktop Parity Algorithm for ChannelMemberStore
     function sanitizeDesktopStyleChannelMembers(props) {
         if (!props || typeof props !== 'object') return props;
-        try {
-            const cloned = { ...props };
-            let hasFiltered = false;
+        if (!Array.isArray(props.rows) || !Array.isArray(props.groups)) return props;
 
-            if (Array.isArray(cloned.rows)) {
-                const origLen = cloned.rows.length;
-                cloned.rows = cloned.rows.filter(r => !isMemberBlockedOrIgnored(r));
-                if (cloned.rows.length !== origLen) hasFiltered = true;
+        let hiddenRows = false;
+        const newGroups = props.groups.map(g => (g && typeof g === 'object') ? { ...g } : g);
+        const newRows = new Array(props.rows.length);
+
+        const groupMap = new Map();
+        newGroups.forEach(g => { if (g && g.id) groupMap.set(g.id, g); });
+
+        const isGroupRow = row => {
+            if (!row || typeof row !== 'object') return false;
+            return row.type === 'GROUP' || row.rowType === 'GROUP' || row.header === true ||
+                   (typeof row.id === 'string' && groupMap.has(row.id));
+        };
+
+        const isMemberRow = row => {
+            if (!row || typeof row !== 'object') return false;
+            if (isGroupRow(row)) return false;
+            return row.type === 'MEMBER' || row.rowType === 'MEMBER' || !!(row.user || row.member || row.userId || row.nick);
+        };
+
+        for (let i = 0; i < props.rows.length; i++) {
+            const row = props.rows[i];
+            if (!row || typeof row !== 'object') {
+                newRows[i] = row;
+                continue;
+            }
+            if (!isMemberRow(row)) {
+                newRows[i] = row;
+                continue;
+            }
+            if (!isMemberBlockedOrIgnored(row)) {
+                newRows[i] = row;
+                continue;
             }
 
-            if (Array.isArray(cloned.groups)) {
-                const blockedCount = props.rows ? props.rows.length - (cloned.rows ? cloned.rows.length : 0) : 0;
-                if (blockedCount > 0) {
-                    cloned.groups = cloned.groups.map(g => updateHeaderCount(g, blockedCount));
+            hiddenRows = true;
+            newRows[i] = undefined;
+
+            let found = false;
+            let rowIndex = i - 1;
+            while (!found && rowIndex > -1) {
+                const prev = newRows[rowIndex];
+                if (prev && isGroupRow(prev)) {
+                    found = true;
+                    const groupIndex = newGroups.findIndex(g => g && g.id === prev.id);
+                    if (groupIndex > -1 && typeof newGroups[groupIndex].count === 'number') {
+                        newGroups[groupIndex].count = Math.max(0, newGroups[groupIndex].count - 1);
+                        if (typeof newGroups[groupIndex].title === 'string') {
+                            newGroups[groupIndex].title = newGroups[groupIndex].title.replace(/(\d+)(?=[^\d]*$)/, String(newGroups[groupIndex].count));
+                        }
+                        prev.count = newGroups[groupIndex].count;
+                        prev.title = newGroups[groupIndex].title;
+                    }
+                } else {
+                    rowIndex--;
                 }
             }
-
-            return hasFiltered ? cloned : props;
-        } catch (_) {
-            return props;
         }
+
+        if (!hiddenRows) return props;
+
+        let leadingOffset = 0;
+        for (let i = 0; i < newRows.length; i++) {
+            const r = newRows[i];
+            if (r && isGroupRow(r)) break;
+            if (r !== undefined) leadingOffset++;
+        }
+
+        let indexSum = leadingOffset;
+        for (let i = 0; i < newGroups.length; i++) {
+            const grp = newGroups[i];
+            if (grp && grp.id !== 'content-inventory-feed') {
+                grp.index = indexSum;
+                if (typeof grp.count === 'number' && grp.count > 0) {
+                    indexSum += (grp.count + 1);
+                }
+            }
+        }
+
+        for (let i = 0; i < newRows.length; i++) {
+            const r = newRows[i];
+            if (r && isGroupRow(r) && typeof r.count === 'number' && r.count <= 0) {
+                newRows[i] = undefined;
+            }
+        }
+
+        const removeEmptyWithin = (array, filter) => {
+            let reversed = [].concat(array).reverse();
+            let suffixLength = 0;
+            for (let i = 0; i < reversed.length; i++) {
+                if (reversed[i] !== undefined) {
+                    suffixLength = i;
+                    break;
+                }
+            }
+            return [].concat(array.filter(filter), new Array(suffixLength));
+        };
+
+        const finalRows = removeEmptyWithin(newRows, n => n !== undefined);
+        if (newGroups[0] && newGroups[0].id === 'content-inventory-feed') {
+            newGroups[0].index = finalRows.length - (newGroups[0].count + 1);
+        }
+        const finalGroups = removeEmptyWithin(newGroups, g => g && g.count > 0);
+
+        for (let i = 0; i < finalGroups.length; i++) {
+            const grp = finalGroups[i];
+            let actualIdx = finalRows.findIndex(r => r && isGroupRow(r) && r.id === grp.id);
+            if (actualIdx === -1) actualIdx = finalRows.findIndex(r => r && r.id === grp.id);
+            if (actualIdx !== -1) grp.index = actualIdx;
+        }
+
+        return {
+            ...props,
+            rows: finalRows,
+            groups: finalGroups
+        };
     }
 
     function syncFromRelationshipStore() {
@@ -483,7 +597,12 @@
         } catch (_) {}
     }
 
+    // =========================================================================
+    // FEATURE 1: RemoveBlockedUsers (Chat, Member Lists, Reactions, Typing)
+    // =========================================================================
     function applyRemoveBlockedUsers() {
+        if (!true) return;
+
         // A. FluxDispatcher: Chat Message Filtering & Realtime Relationship Sync
         if (_FluxDispatcher && typeof _FluxDispatcher.dispatch === 'function') {
             safePatch('instead', _FluxDispatcher, 'dispatch', function(args, orig) {
@@ -507,6 +626,8 @@
                         if (event.type === 'CONNECTION_OPEN') {
                             cachedCurrentUserId = event.user?.id ? String(event.user.id) : null;
                             if (Array.isArray(event.relationships)) {
+                                blockedUserIdsSet.clear();
+                                ignoredUserIdsSet.clear();
                                 for (const r of event.relationships) {
                                     const rid = String(r.id);
                                     if (r.type === 2) blockedUserIdsSet.add(rid);
@@ -516,7 +637,7 @@
                             }
                         }
 
-                        // Filter messages
+                        // Filter incoming messages
                         if (event.type === 'LOAD_MESSAGES_SUCCESS' && Array.isArray(event.messages)) {
                             event.messages = event.messages.filter(msg => {
                                 if (!msg) return false;
@@ -764,8 +885,8 @@
             const memberRowNames = ['MemberListItem', 'GuildMemberRow', 'ChannelMemberRow', 'MemberRow', 'GuildMemberListItem'];
             for (const name of memberRowNames) {
                 const holder = findByProps(name);
-                if (holder && typeof holder[name] === 'function') {
-                    safePatch('instead', holder, name, function(args, orig) {
+                if (holder) {
+                    safePatchComponent(holder, name, function(args, orig) {
                         const props = args[0];
                         if (isMemberBlockedOrIgnored(props)) return renderEmptyRow();
                         return orig ? orig.apply(this, args) : null;
@@ -775,9 +896,171 @@
         } catch (_) {}
     }
 
+    // =========================================================================
+    // FEATURE 2: HideBlockedInSettings (Settings & Friends Navigation Hiding)
+    // =========================================================================
+    function applyHideBlockedInSettings() {
+        if (!false) return;
+
+        // A. RelationshipStore: Neutralize isBlocked & queries for Discord UI components
+        if (RelationshipStore) {
+            if (typeof RelationshipStore.getBlockedUserIds === 'function') {
+                safePatch('instead', RelationshipStore, 'getBlockedUserIds', () => []);
+            }
+            if (typeof RelationshipStore.getIgnoredUserIds === 'function') {
+                safePatch('instead', RelationshipStore, 'getIgnoredUserIds', () => []);
+            }
+            if (typeof RelationshipStore.getBlockedOrIgnoredUserIds === 'function') {
+                safePatch('instead', RelationshipStore, 'getBlockedOrIgnoredUserIds', () => []);
+            }
+            if (typeof RelationshipStore.getBlockedOrIgnoredIDs === 'function') {
+                safePatch('instead', RelationshipStore, 'getBlockedOrIgnoredIDs', () => []);
+            }
+            if (typeof RelationshipStore.getBlockedCount === 'function') {
+                safePatch('instead', RelationshipStore, 'getBlockedCount', () => 0);
+            }
+            if (typeof RelationshipStore.getIgnoredCount === 'function') {
+                safePatch('instead', RelationshipStore, 'getIgnoredCount', () => 0);
+            }
+            if (typeof RelationshipStore.hasBlocked === 'function') {
+                safePatch('instead', RelationshipStore, 'hasBlocked', () => false);
+            }
+            if (typeof RelationshipStore.hasIgnored === 'function') {
+                safePatch('instead', RelationshipStore, 'hasIgnored', () => false);
+            }
+            if (typeof RelationshipStore.isBlocked === 'function') {
+                safePatch('instead', RelationshipStore, 'isBlocked', () => false);
+            }
+            if (typeof RelationshipStore.isIgnored === 'function') {
+                safePatch('instead', RelationshipStore, 'isIgnored', () => false);
+            }
+            if (typeof RelationshipStore.getRelationships === 'function') {
+                safePatch('instead', RelationshipStore, 'getRelationships', function(args, orig) {
+                    const res = orig ? orig.apply(this, args) : {};
+                    if (!res || typeof res !== 'object') return res;
+                    const cloned = { ...res };
+                    for (const uid in cloned) {
+                        if (cloned[uid] === 2 || cloned[uid] === 5) delete cloned[uid];
+                    }
+                    return cloned;
+                });
+            }
+            if (typeof RelationshipStore.getRelationshipType === 'function') {
+                safePatch('instead', RelationshipStore, 'getRelationshipType', function(args, orig) {
+                    const targetId = args[0];
+                    if (isBlockedOrIgnored(targetId)) return 0;
+                    return orig ? orig.apply(this, args) : 0;
+                });
+            }
+            if (typeof RelationshipStore.getRelationshipCount === 'function') {
+                safePatch('instead', RelationshipStore, 'getRelationshipCount', function(args, orig) {
+                    const type = args[0];
+                    if (type === 2 || type === 5) return 0;
+                    return orig ? orig.apply(this, args) : 0;
+                });
+            }
+        }
+
+        // B. Native Settings Form Components (TableRow, TableSection, TableRowGroup, FormRow, FormSection)
+        try {
+            const settingsTargetMods = new Set();
+            if (_vendetta.ui?.components?.Forms) settingsTargetMods.add(_vendetta.ui.components.Forms);
+            const formKeys = [
+                'TableRow', 'TableSection', 'TableRowGroup',
+                'TableSwitchRow', 'TableRadioRow', 'TableCheckboxRow',
+                'FormRow', 'FormSection', 'FormHelpText', 'FormNotice', 'FormLabel', 'FormTitle'
+            ];
+            for (const p of formKeys) {
+                const m = findByProps(p);
+                if (m && typeof m === 'object') settingsTargetMods.add(m);
+            }
+            for (const mod of settingsTargetMods) {
+                for (const k of formKeys) {
+                    safePatchComponent(mod, k, function(args, orig) {
+                        const p = args[0] || {};
+                        if (isSettingsBlockedSection(p)) return renderEmptyRow();
+                        if (k === 'TableRowGroup' && p.children) {
+                            const ch = Array.isArray(p.children) ? p.children : [p.children];
+                            const nonBlocked = ch.filter(c => c && !isSettingsBlockedSection(c));
+                            if (nonBlocked.length === 0) return renderEmptyRow();
+                        }
+                        const res = orig ? orig.apply(this, args) : null;
+                        if (res && res.props && isSettingsBlockedSection(res.props)) return renderEmptyRow();
+                        return res;
+                    });
+                }
+            }
+        } catch (_) {}
+
+        // C. Friends Navigation Tablist Filter
+        try {
+            const friendsNavMod = findByProps('FriendsTabs', 'getFriendsTabs');
+            if (friendsNavMod) {
+                for (const key of ['FriendsTabs', 'getFriendsTabs']) {
+                    if (typeof friendsNavMod[key] === 'function') {
+                        safePatch('after', friendsNavMod, key, function(args, res) {
+                            if (Array.isArray(res)) {
+                                return res.filter(t => !/blocked/i.test(t?.id || t?.title || t?.key || ''));
+                            }
+                            return res;
+                        });
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
+    // =========================================================================
+    // FEATURE 3: BypassBlockedOrIgnored (Voice Channel Modal Bypass)
+    // =========================================================================
+    function applyBypassBlockedOrIgnored() {
+        if (!false) return;
+        try {
+            // A. Bypass warning modal when connecting to voice
+            const voiceMod = findByProps('handleVoiceConnect');
+            if (voiceMod && typeof voiceMod.handleVoiceConnect === 'function') {
+                safePatch('before', voiceMod, 'handleVoiceConnect', function(args) {
+                    try {
+                        if (args[0] && typeof args[0] === 'object') {
+                            args[0].bypassBlockedWarningModal = true;
+                        }
+                    } catch (_) {}
+                });
+            }
+
+            // B. Force channel blocked/ignored sets to return empty sets
+            const boiHelpers = findByProps('getBlockedUsersForVoiceChannel', 'getIgnoredUsersForVoiceChannel');
+            if (boiHelpers) {
+                if (typeof boiHelpers.getBlockedUsersForVoiceChannel === 'function') {
+                    safePatch('instead', boiHelpers, 'getBlockedUsersForVoiceChannel', function() {
+                        return new Set();
+                    });
+                }
+                if (typeof boiHelpers.getIgnoredUsersForVoiceChannel === 'function') {
+                    safePatch('instead', boiHelpers, 'getIgnoredUsersForVoiceChannel', function() {
+                        return new Set();
+                    });
+                }
+            }
+
+            // C. Suppress modal when a blocked or ignored user joins your voice channel
+            const boiJoin = findByProps('handleBlockedOrIgnoredUserVoiceChannelJoin');
+            if (boiJoin && typeof boiJoin.handleBlockedOrIgnoredUserVoiceChannelJoin === 'function') {
+                safePatch('instead', boiJoin, 'handleBlockedOrIgnoredUserVoiceChannelJoin', function() {
+                    return;
+                });
+            }
+        } catch (e) {
+            console.error('[BypassBlockedOrIgnored Error]', e);
+        }
+    }
+
+    // =========================================================================
+    // Plugin Lifecycle
+    // =========================================================================
     function startPlugin() {
         try {
-            console.log('[RemoveBlockedUsers v1.8.3] Initializing...');
+            console.log('[RemoveBlockedUsers v1.8.4] Initializing...');
 
             if (!_patcher || typeof _patcher.instead !== 'function') {
                 _patcher = (typeof patcher !== 'undefined' && patcher) ||
@@ -840,25 +1123,27 @@
                 rawGetPresenceStatus = PresenceStore.getStatus;
             }
 
-        try { applyRemoveBlockedUsers(); } catch (err) { console.error('[applyRemoveBlockedUsers Error]', err); }
+            try { applyRemoveBlockedUsers(); } catch (err) { console.error('[applyRemoveBlockedUsers Error]', err); }
+            try { applyHideBlockedInSettings(); } catch (err) { console.error('[applyHideBlockedInSettings Error]', err); }
+            try { applyBypassBlockedOrIgnored(); } catch (err) { console.error('[applyBypassBlockedOrIgnored Error]', err); }
 
             notifyActive();
-            console.log('[RemoveBlockedUsers v1.8.3] Loaded and active successfully.');
+            console.log('[RemoveBlockedUsers v1.8.4] Loaded and active successfully.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.3 Error]', e);
+            console.error('[RemoveBlockedUsers v1.8.4 Error]', e);
         }
     }
 
     function stopPlugin() {
         try {
-            console.log('[RemoveBlockedUsers v1.8.3] Stopping...');
+            console.log('[RemoveBlockedUsers v1.8.4] Stopping...');
             while (unpatches.length > 0) {
                 const unpatch = unpatches.pop();
                 try { if (typeof unpatch === 'function') unpatch(); } catch (_) {}
             }
-            console.log('[RemoveBlockedUsers v1.8.3] Stopped cleanly.');
+            console.log('[RemoveBlockedUsers v1.8.4] Stopped cleanly.');
         } catch (e) {
-            console.error('[RemoveBlockedUsers v1.8.3 Error stopping]', e);
+            console.error('[RemoveBlockedUsers v1.8.4 Error stopping]', e);
         }
     }
 
@@ -866,28 +1151,12 @@
         name: 'RemoveBlockedUsers',
         description: 'Removes blocked and ignored messages, collapsed bars, member list rows, typing indicators, and reactions with 1:1 desktop parity.',
         authors: [{ name: 'Antigravity', id: '698947564459917343' }],
-        version: '1.8.3',
+        version: '1.8.4',
         start: startPlugin,
         stop: stopPlugin,
         onLoad: startPlugin,
         onUnload: stopPlugin
     };
-
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = pluginExport;
-        module.exports.default = pluginExport;
-        module.exports.start = startPlugin;
-        module.exports.stop = stopPlugin;
-        module.exports.onLoad = startPlugin;
-        module.exports.onUnload = stopPlugin;
-    }
-    if (typeof exports !== 'undefined') {
-        exports.default = pluginExport;
-        exports.start = startPlugin;
-        exports.stop = stopPlugin;
-        exports.onLoad = startPlugin;
-        exports.onUnload = stopPlugin;
-    }
 
     return {
         default: pluginExport,
